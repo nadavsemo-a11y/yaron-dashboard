@@ -345,6 +345,10 @@
     color: var(--text-muted);
     white-space: nowrap;
   }
+  .task-item.overdue {
+    border-color: rgba(224,92,92,0.35) !important;
+    background: rgba(224,92,92,0.04);
+  }
   .date-chip.overdue { color: var(--danger); border-color: rgba(224,92,92,0.3); background: rgba(224,92,92,0.08); }
   .date-chip.today   { color: var(--status-wait); border-color: rgba(240,165,0,0.3); background: rgba(240,165,0,0.08); }
 
@@ -724,7 +728,7 @@
     return `${day}/${m}/${y}`;
   }
   function dateClass(d) {
-    if (!d) return '';
+    if (!d) return 'overdue';
     const today = todayStr();
     if (d < today) return 'overdue';
     if (d === today) return 'today';
@@ -880,8 +884,9 @@
     const isDone = t.status === 'בתהליך';
     const advClass = isDone ? 'btn-advance btn-advance-done btn-advance-done-bold' :
                      t.status === 'ממתין' ? 'btn-advance btn-advance-prog' : 'btn-advance btn-advance-start';
+    const overdueRow = (!t.date || t.date < todayStr()) ? ' overdue' : '';
     return `
-      <div class="task-item" id="task-${t.id}">
+      <div class="task-item${overdueRow}" id="task-${t.id}">
         <span class="task-name">${escHtml(t.name)}</span>
         <span class="status-pill ${statusClass}">${t.status}</span>
         <div class="task-actions">
