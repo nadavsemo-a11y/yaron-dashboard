@@ -841,7 +841,19 @@
       grouped[t.parentName].push(t);
     });
 
-    const html = Object.entries(grouped).map(([project, items]) => {
+    // Sort projects א-ב, tasks within each project by date
+    const sortedProjects = Object.keys(grouped).sort((a, b) => a.localeCompare(b, 'he'));
+    sortedProjects.forEach(p => {
+      grouped[p].sort((a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return -1;
+        if (!b.date) return 1;
+        return a.date.localeCompare(b.date);
+      });
+    });
+
+    const html = sortedProjects.map(project => {
+      const items = grouped[project];
       const isOpen = openProjects.has(project) || search;
       return `
         <div class="project-group">
