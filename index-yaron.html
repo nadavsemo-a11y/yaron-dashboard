@@ -348,6 +348,11 @@
   .date-chip.overdue { color: var(--danger); border-color: rgba(224,92,92,0.3); background: rgba(224,92,92,0.08); }
   .date-chip.today   { color: var(--status-wait); border-color: rgba(240,165,0,0.3); background: rgba(240,165,0,0.08); }
 
+  /* date dropdown wrapper */
+  .date-wrapper {
+    position: relative;
+    flex-shrink: 0;
+  }
   .btn-date-main {
     display: flex;
     align-items: center;
@@ -362,39 +367,58 @@
     cursor: pointer;
     transition: all 0.18s;
     white-space: nowrap;
-    flex-shrink: 0;
   }
   .btn-date-main:hover { border-color: var(--accent); color: var(--accent); background: rgba(79,142,247,0.07); }
   .btn-date-main.open { border-color: var(--accent); color: var(--accent); background: rgba(79,142,247,0.1); }
 
-  /* date panel */
-  .date-panel {
+  /* dropdown menu */
+  .date-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    min-width: 170px;
+    z-index: 200;
+    overflow: hidden;
+    animation: dropIn 0.15s ease;
+  }
+  @keyframes dropIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+  .date-dropdown.open { display: block; }
+
+  .date-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-family: 'Heebo', sans-serif;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: right;
+  }
+  .date-dropdown-item:hover { background: rgba(79,142,247,0.1); color: var(--accent); }
+  .date-dropdown-item .item-icon { font-size: 15px; flex-shrink: 0; }
+
+  .date-dropdown-divider { border: none; border-top: 1px solid var(--border); margin: 3px 0; }
+
+  /* manual date row inside dropdown */
+  .date-manual-row {
     display: none;
     align-items: center;
     gap: 6px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 10px;
-    flex-wrap: wrap;
+    padding: 8px 12px;
   }
-  .date-panel.open { display: flex; }
-  .btn-postpone {
-    background: rgba(79,142,247,0.12);
-    border: 1px solid rgba(79,142,247,0.3);
-    color: #4f8ef7;
-    border-radius: 6px;
-    padding: 5px 11px;
-    font-size: 12px;
-    font-weight: 600;
-    font-family: 'Heebo', sans-serif;
-    cursor: pointer;
-    transition: all 0.18s;
-    white-space: nowrap;
-  }
-  .btn-postpone:hover { background: rgba(79,142,247,0.25); }
-  .date-sep { color: var(--border); font-size: 16px; }
+  .date-manual-row.open { display: flex; }
   .date-input {
+    flex: 1;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -403,7 +427,7 @@
     padding: 5px 8px;
     font-family: 'Heebo', sans-serif;
     outline: none;
-    width: 130px;
+    min-width: 0;
   }
   .date-input:focus { border-color: var(--accent); }
   .btn-date-confirm {
@@ -411,25 +435,16 @@
     border: none;
     color: white;
     border-radius: 6px;
-    padding: 5px 12px;
+    padding: 5px 10px;
     font-size: 12px;
     font-weight: 600;
     font-family: 'Heebo', sans-serif;
     cursor: pointer;
     transition: opacity 0.18s;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
-  .btn-advance-done-bold {
-    background: rgba(109,191,103,0.3) !important;
-    color: #7ee87a !important;
-    border: 1.5px solid rgba(109,191,103,0.7) !important;
-    font-size: 14px !important;
-    padding: 8px 18px !important;
-    box-shadow: 0 0 10px rgba(109,191,103,0.2);
-  }
-  .btn-advance-done-bold:hover {
-    background: rgba(109,191,103,0.5) !important;
-    box-shadow: 0 0 16px rgba(109,191,103,0.35);
-  }
+  .btn-date-confirm:hover { opacity: 0.85; }
 
   /* ── Filter today toggle ── */
   .toggle-wrap {
@@ -857,58 +872,85 @@
     renderFiltered();
   }
 
-  // advance button style per status
-  const btnClass = {
-    'טרם החל': 'btn-advance btn-advance-start',
-    'ממתין':   'btn-advance btn-advance-prog',
-    'בתהליך':  'btn-advance btn-advance-done',
-  };
-
   function taskHtml(t) {
-    const statusClass = 'status-' + t.status;
+    const statusClass = `status-${t.status}`;
     const label = nextLabel[t.status] || '→';
-    const bClass = btnClass[t.status] || 'btn-advance';
     const dClass = dateClass(t.date);
     const dLabel = t.date ? formatDate(t.date) : 'ללא תאריך';
     const isDone = t.status === 'בתהליך';
-    const boldExtra = isDone ? ' btn-advance-done-bold' : '';
-    return '<div class="task-item" id="task-' + t.id + '">' +
-      '<span class="task-name">' + escHtml(t.name) + '</span>' +
-      '<span class="status-pill ' + statusClass + '">' + t.status + '</span>' +
-      '<div class="task-actions">' +
-        '<span class="date-chip ' + dClass + '" id="dlabel-' + t.id + '">📅 ' + dLabel + '</span>' +
-        '<button class="btn-date-main" id="dtoggle-' + t.id + '" onclick="toggleDatePanel(\'' + t.id + '\')">✏️ תאריך</button>' +
-      '</div>' +
-      '<div class="date-panel" id="dp-' + t.id + '">' +
-        '<button class="btn-postpone" onclick="postpone(\'' + t.id + '\', \'' + (t.date || '') + '\')">+7 ימים</button>' +
-        '<span class="date-sep">|</span>' +
-        '<input type="date" class="date-input" id="di-' + t.id + '" value="' + (t.date || todayStr()) + '">' +
-        '<button class="btn-date-confirm" onclick="setDate(\'' + t.id + '\')">✓ קבע</button>' +
-      '</div>' +
-      '<button class="' + bClass + boldExtra + '" onclick="advanceStatus(this, \'' + t.id + '\', \'' + escHtml(t.name) + '\', \'' + t.status + '\')">' + label + '</button>' +
-    '</div>';
+    const advClass = isDone ? 'btn-advance btn-advance-done btn-advance-done-bold' :
+                     t.status === 'ממתין' ? 'btn-advance btn-advance-prog' : 'btn-advance btn-advance-start';
+    return `
+      <div class="task-item" id="task-${t.id}">
+        <span class="task-name">${escHtml(t.name)}</span>
+        <span class="status-pill ${statusClass}">${t.status}</span>
+        <div class="task-actions">
+          <span class="date-chip ${dClass}" id="dlabel-${t.id}">📅 ${dLabel}</span>
+          <div class="date-wrapper">
+            <button class="btn-date-main" id="dtoggle-${t.id}" onclick="toggleDateDropdown('${t.id}', event)">✏️ תאריך</button>
+            <div class="date-dropdown" id="ddrop-${t.id}">
+              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 1, '${t.date||''}')">
+                <span class="item-icon">📅</span> +1 יום
+              </button>
+              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 7, '${t.date||''}')">
+                <span class="item-icon">📅</span> +7 ימים
+              </button>
+              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 30, '${t.date||''}')">
+                <span class="item-icon">📅</span> +30 ימים
+              </button>
+              <hr class="date-dropdown-divider">
+              <button class="date-dropdown-item" onclick="showManualDate('${t.id}')">
+                <span class="item-icon">✍️</span> תאריך ידני
+              </button>
+              <div class="date-manual-row" id="dmanual-${t.id}">
+                <input type="date" class="date-input" id="di-${t.id}" value="${t.date || todayStr()}">
+                <button class="btn-date-confirm" onclick="setDate('${t.id}')">✓</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button class="${advClass}" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${label}</button>
+      </div>`;
   }
 
-  function toggleDatePanel(id) {
-    const panel = document.getElementById('dp-' + id);
+  function toggleDateDropdown(id, event) {
+    event && event.stopPropagation();
+    const drop = document.getElementById('ddrop-' + id);
     const btn = document.getElementById('dtoggle-' + id);
-    panel.classList.toggle('open');
-    if (btn) btn.classList.toggle('open', panel.classList.contains('open'));
+    const isOpen = drop.classList.contains('open');
+    // close all others
+    document.querySelectorAll('.date-dropdown.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
+    if (!isOpen) {
+      drop.classList.add('open');
+      btn.classList.add('open');
+    }
   }
 
-  async function postpone(itemId, currentDate) {
-    const newDate = addDays(currentDate, 7);
+  // close dropdowns on outside click
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.date-dropdown.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
+  });
+
+  function showManualDate(id) {
+    document.getElementById('dmanual-' + id).classList.toggle('open');
+  }
+
+  async function quickDate(itemId, days, currentDate) {
+    const newDate = addDays(currentDate, days);
     await updateDate(itemId, newDate);
+    // close dropdown
+    document.querySelectorAll('.date-dropdown.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
   }
 
   async function setDate(itemId) {
-    const val = document.getElementById('di-' + itemId).value;
+    const val = document.getElementById(`di-${itemId}`).value;
     if (!val) return;
     await updateDate(itemId, val);
-    const panel = document.getElementById('dp-' + itemId);
-    const btn = document.getElementById('dtoggle-' + itemId);
-    if (panel) panel.classList.remove('open');
-    if (btn) btn.classList.remove('open');
+    document.getElementById('ddrop-' + itemId).classList.remove('open');
+    document.getElementById('dtoggle-' + itemId).classList.remove('open');
   }
 
   async function updateDate(itemId, date) {
@@ -919,17 +961,16 @@
         body: JSON.stringify({ itemId, date }),
       });
       if (!res.ok) throw new Error();
-      // עדכן מקומית
       const task = allTasks.find(t => t.id === itemId);
       if (task) {
         task.date = date;
         const dClass = dateClass(date);
-        const el = document.getElementById(`dlabel-${itemId}`);
-        if (el) { el.textContent = `📅 ${formatDate(date)}`; el.className = `date-label ${dClass}`; }
-        const di = document.getElementById(`di-${itemId}`);
+        const el = document.getElementById('dlabel-' + itemId);
+        if (el) { el.textContent = '📅 ' + formatDate(date); el.className = 'date-chip ' + dClass; }
+        const di = document.getElementById('di-' + itemId);
         if (di) di.value = date;
       }
-      showToast(`תאריך עודכן ל-${formatDate(date)}`);
+      showToast('תאריך עודכן ל-' + formatDate(date));
     } catch {
       showToast('שגיאה בעדכון תאריך');
     }
