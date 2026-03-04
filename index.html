@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<!-- COMMIT: Update Yaron dashboard -->
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ירון שושנה | משימות</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3248;
+    --accent: #4f8ef7;
+    --accent2: #7c5cbf;
+    --text: #e8eaf6;
+    --text-muted: #7a7f99;
+    --status-wait: #f0a500;
+    --status-progress: #4f8ef7;
+    --status-new: #6dbf67;
+    --danger: #e05c5c;
+    --radius: 10px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Heebo', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    direction: rtl;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .header-name {
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .header-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 1px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .task-count-badge {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .task-count-badge span {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .btn-refresh {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: var(--radius);
+    padding: 7px 14px;
+    font-size: 13px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Controls Bar ── */
+  .controls {
+    padding: 16px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .search-wrapper {
+    flex: 1;
+    min-width: 200px;
+    position: relative;
+  }
+
+  .search-icon {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 15px;
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 38px 9px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: 'Heebo', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+    direction: rtl;
+  }
+  .search-input::placeholder { color: var(--text-muted); }
+  .search-input:focus { border-color: var(--accent); }
+
+  .filter-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: 'Heebo', sans-serif;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    direction: rtl;
+    min-width: 140px;
+  }
+  .filter-select:focus { border-color: var(--accent); }
+  .filter-select option { background: var(--surface2); }
+
+  /* ── Stats Bar ── */
+  .stats-bar {
+    padding: 12px 24px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .stat-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .stat-chip:hover, .stat-chip.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .stat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .stat-num { font-weight: 600; color: var(--text); }
+
+  /* ── Task List ── */
+  .list-container {
+    padding: 0 24px 24px;
+  }
+
+  .project-group {
+    margin-bottom: 8px;
+  }
+
+  .project-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin-bottom: 4px;
+  }
+  .project-header:hover { border-color: var(--accent); }
+
+  .project-chevron {
+    color: var(--text-muted);
+    font-size: 11px;
+    transition: transform 0.2s;
+    margin-right: auto;
+  }
+  .project-header.open .project-chevron { transform: rotate(180deg); }
+
+  .project-name {
+    font-size: 14px;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .project-count {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2px 9px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .tasks-list {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    padding-right: 12px;
+  }
+  .tasks-list.open { display: flex; }
+
+  .task-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    transition: all 0.15s;
+    animation: fadeIn 0.2s ease;
+  }
+  .task-item:hover {
+    border-color: var(--border);
+    background: var(--surface2);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .task-name {
+    flex: 1;
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+
+  .status-pill {
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .status-ממתין { background: rgba(240,165,0,0.15); color: var(--status-wait); border: 1px solid rgba(240,165,0,0.3); }
+  .status-בתהליך { background: rgba(79,142,247,0.15); color: var(--status-progress); border: 1px solid rgba(79,142,247,0.3); }
+  .status-טרם\ החל { background: rgba(109,191,103,0.15); color: var(--status-new); border: 1px solid rgba(109,191,103,0.3); }
+
+  .btn-done {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .btn-done:hover { border-color: var(--status-new); color: var(--status-new); background: rgba(109,191,103,0.08); }
+  .btn-done:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-done.completing { opacity: 0.5; }
+
+  /* ── Date ── */
+  .task-date {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .date-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .date-label.overdue { color: var(--danger); }
+  .date-label.today { color: var(--status-wait); }
+  .btn-date {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-date:hover { border-color: var(--accent); color: var(--accent); }
+  .date-picker-inline {
+    display: none;
+    align-items: center;
+    gap: 5px;
+    margin-top: 4px;
+  }
+  .date-picker-inline.open { display: flex; }
+  .date-input {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 4px 8px;
+    font-family: 'Heebo', sans-serif;
+    outline: none;
+  }
+  .date-input:focus { border-color: var(--accent); }
+  .btn-date-confirm {
+    background: var(--accent);
+    border: none;
+    color: white;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+  }
+
+  /* ── Filter today toggle ── */
+  .toggle-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle {
+    width: 36px;
+    height: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle::after {
+    content: '';
+    width: 14px;
+    height: 14px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    transition: all 0.2s;
+  }
+  .toggle.on { background: var(--accent); border-color: var(--accent); }
+  .toggle.on::after { background: white; right: auto; left: 2px; }
+
+  /* ── Intro Modal ── */
+  .intro-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,11,18,0.85);
+    backdrop-filter: blur(6px);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeInOverlay 0.4s ease;
+  }
+  @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
+
+  .intro-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 28px 24px;
+    max-width: 480px;
+    width: 100%;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    animation: slideUp 0.4s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+
+  .intro-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 16px;
+  }
+  .intro-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .intro-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  .intro-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .intro-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .intro-list li .icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .intro-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 18px 0;
+  }
+  .intro-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  .intro-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  .btn-intro-confirm {
+    width: 100%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    padding: 11px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn-intro-confirm:hover { opacity: 0.88; }
+
+  /* ── Empty / Loading States ── */
+  .state-box {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--text-muted);
+  }
+  .state-icon { font-size: 40px; margin-bottom: 12px; }
+  .state-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .state-sub { font-size: 13px; }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 20px;
+    font-size: 13px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transition: transform 0.3s cubic-bezier(.34,1.56,.64,1);
+    z-index: 999;
+    white-space: nowrap;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    header, .controls, .stats-bar, .list-container { padding-right: 14px; padding-left: 14px; }
+    .controls { gap: 8px; }
+    .filter-select { min-width: 0; flex: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div class="intro-overlay" id="introOverlay" style="display:none;">
+  <div class="intro-box">
+    <div class="intro-avatar">👋</div>
+    <div class="intro-title">שלום ירון!</div>
+    <div class="intro-sub">בזמן שהמשימות שלך נטענות — שניה אחת להכיר את המערכת</div>
+
+    <ul class="intro-list">
+      <li><span class="icon">📋</span><span>המערכת מציגה את <strong>כל המשימות הפתוחות שמשויכות אליך</strong> — ממתין, בתהליך, וטרם החל.</span></li>
+      <li><span class="icon">📁</span><span>המשימות מאורגנות <strong>לפי פרויקט</strong>. לחץ על שם פרויקט כדי לפתוח או לסגור את רשימת המשימות שלו.</span></li>
+      <li><span class="icon">▶️</span><span>כל משימה מציגה את <strong>השלב הבא</strong> שניתן ללחוץ עליו כדי להתקדם: טרם החל → ממתין → בתהליך → בוצע.</span></li>
+      <li><span class="icon">📅</span><span>ניתן <strong>לדחות תאריך בשבוע</strong> או <strong>לקבוע תאריך ידני</strong> לכל משימה.</span></li>
+      <li><span class="icon">🔍</span><span>יש <strong>חיפוש חופשי</strong>, סינון לפי סטטוס ופרויקט, ואפשרות להציג <strong>רק משימות מהיום ואילך</strong>.</span></li>
+    </ul>
+
+    <hr class="intro-divider">
+    <div class="intro-loading" id="introLoadingMsg">
+      <div class="intro-spinner"></div>
+      <span>טוען משימות ממאנדיי, רגע...</span>
+    </div>
+
+    <button class="btn-intro-confirm" id="introConfirmBtn" onclick="dismissIntro()" disabled style="opacity:0.4;">
+      ✓ הבנתי, בואו נתחיל
+    </button>
+  </div>
+</div>
+
+<header>
+  <div class="header-left">
+    <div class="avatar">יש</div>
+    <div>
+      <div class="header-name">ירון שושנה</div>
+      <div class="header-sub">לוח משימות</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="task-count-badge">סה"כ: <span id="totalCount">—</span></div>
+    <button class="btn-refresh" onclick="loadTasks()">
+      <span id="refreshIcon">↻</span> רענן
+    </button>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="search-wrapper">
+    <span class="search-icon">🔍</span>
+    <input class="search-input" id="searchInput" type="text" placeholder="חיפוש משימה או פרויקט..." oninput="renderFiltered()">
+  </div>
+  <select class="filter-select" id="statusFilter" onchange="renderFiltered()">
+    <option value="">כל הסטטוסים</option>
+    <option value="ממתין">⏳ ממתין</option>
+    <option value="בתהליך">🔄 בתהליך</option>
+    <option value="טרם החל">🟢 טרם החל</option>
+  </select>
+  <select class="filter-select" id="projectFilter" onchange="renderFiltered()">
+    <option value="">כל הפרויקטים</option>
+  </select>
+  <label class="toggle-wrap" onclick="toggleTodayFilter()">
+    <div class="toggle" id="todayToggle"></div>
+    <span id="todayLabel">מהיום בלבד</span>
+  </label>
+</div>
+
+<div class="stats-bar" id="statsBar"></div>
+
+<div class="list-container" id="listContainer">
+  <div class="state-box">
+    <div class="spinner"></div>
+    <div class="state-title">טוען משימות...</div>
+    <div class="state-sub">מביא את כל הנתונים ממאנדיי</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const WORKER_URL = 'https://monday-yaron.monday-shimrit.workers.dev';
+
+  let allTasks = [];
+  let openProjects = new Set();
+  let filterFromToday = false;
+
+  function todayStr() {
+    return new Date().toISOString().split('T')[0];
+  }
+  function formatDate(d) {
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
+  }
+  function dateClass(d) {
+    if (!d) return '';
+    const today = todayStr();
+    if (d < today) return 'overdue';
+    if (d === today) return 'today';
+    return '';
+  }
+  function addDays(d, n) {
+    const date = new Date(d || todayStr());
+    date.setDate(date.getDate() + n);
+    return date.toISOString().split('T')[0];
+  }
+
+  // ── Load ──
+  async function loadTasks() {
+    document.getElementById('refreshIcon').style.animation = 'spin 0.8s linear infinite';
+    document.getElementById('listContainer').innerHTML = `
+      <div class="state-box">
+        <div class="spinner"></div>
+        <div class="state-title">טוען משימות...</div>
+        <div class="state-sub">עם הרבה משימות זה יכול לקחת כמה שניות</div>
+      </div>`;
+
+    try {
+      const res = await fetch(`${WORKER_URL}/items`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      allTasks = await res.json();
+
+      populateProjectFilter();
+      renderStats();
+      renderFiltered();
+      showToast(`נטענו ${allTasks.length} משימות ✓`);
+    } catch (e) {
+      document.getElementById('listContainer').innerHTML = `
+        <div class="state-box">
+          <div class="state-icon">⚠️</div>
+          <div class="state-title">שגיאה בטעינה</div>
+          <div class="state-sub">${e.message}</div>
+        </div>`;
+    } finally {
+      document.getElementById('refreshIcon').style.animation = '';
+    }
+  }
+
+  // ── Populate project dropdown ──
+  function populateProjectFilter() {
+    const projects = [...new Set(allTasks.map(t => t.parentName))].sort((a, b) =>
+      a.localeCompare(b, 'he'));
+    const sel = document.getElementById('projectFilter');
+    sel.innerHTML = '<option value="">כל הפרויקטים</option>';
+    projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      sel.appendChild(opt);
+    });
+  }
+
+  // ── Stats ──
+  function renderStats() {
+    const counts = { 'ממתין': 0, 'בתהליך': 0, 'טרם החל': 0 };
+    allTasks.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+    document.getElementById('totalCount').textContent = allTasks.length;
+
+    const colors = { 'ממתין': '#f0a500', 'בתהליך': '#4f8ef7', 'טרם החל': '#6dbf67' };
+    document.getElementById('statsBar').innerHTML = Object.entries(counts)
+      .map(([s, n]) => `
+        <div class="stat-chip" onclick="quickFilter('${s}')">
+          <span class="stat-dot" style="background:${colors[s]}"></span>
+          ${s}: <span class="stat-num">${n}</span>
+        </div>`).join('');
+  }
+
+  function quickFilter(status) {
+    document.getElementById('statusFilter').value = status;
+    renderFiltered();
+  }
+
+  // ── Filter & Render ──
+  function renderFiltered() {
+    const search = document.getElementById('searchInput').value.trim().toLowerCase();
+    const statusF = document.getElementById('statusFilter').value;
+    const projectF = document.getElementById('projectFilter').value;
+
+    let tasks = allTasks;
+    if (statusF) tasks = tasks.filter(t => t.status === statusF);
+    if (projectF) tasks = tasks.filter(t => t.parentName === projectF);
+    if (search) tasks = tasks.filter(t =>
+      t.name.toLowerCase().includes(search) ||
+      t.parentName.toLowerCase().includes(search));
+    if (filterFromToday) {
+      const today = todayStr();
+      tasks = tasks.filter(t => !t.date || t.date >= today);
+    }
+
+    document.getElementById('totalCount').textContent = `${tasks.length} / ${allTasks.length}`;
+
+    if (tasks.length === 0) {
+      document.getElementById('listContainer').innerHTML = `
+        <div class="state-box">
+          <div class="state-icon">🔍</div>
+          <div class="state-title">לא נמצאו משימות</div>
+          <div class="state-sub">נסה לשנות את הסינון</div>
+        </div>`;
+      return;
+    }
+
+    // Group by project
+    const grouped = {};
+    tasks.forEach(t => {
+      if (!grouped[t.parentName]) grouped[t.parentName] = [];
+      grouped[t.parentName].push(t);
+    });
+
+    const html = Object.entries(grouped).map(([project, items]) => {
+      const isOpen = openProjects.has(project) || search;
+      return `
+        <div class="project-group">
+          <div class="project-header ${isOpen ? 'open' : ''}" onclick="toggleProject(this, '${escHtml(project)}')">
+            <span class="project-name">${escHtml(project)}</span>
+            <span class="project-count">${items.length}</span>
+            <span class="project-chevron">▼</span>
+          </div>
+          <div class="tasks-list ${isOpen ? 'open' : ''}">
+            ${items.map(t => taskHtml(t)).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('listContainer').innerHTML = html;
+  }
+
+  const nextStatus = {
+    'טרם החל': 'ממתין',
+    'ממתין': 'בתהליך',
+    'בתהליך': 'בוצע'
+  };
+  const nextLabel = {
+    'טרם החל': '→ ממתין',
+    'ממתין': '→ בתהליך',
+    'בתהליך': '✓ בוצע'
+  };
+
+  function toggleTodayFilter() {
+    filterFromToday = !filterFromToday;
+    document.getElementById('todayToggle').classList.toggle('on', filterFromToday);
+    renderFiltered();
+  }
+
+  function taskHtml(t) {
+    const statusClass = `status-${t.status}`;
+    const label = nextLabel[t.status] || '→';
+    const dClass = dateClass(t.date);
+    const dLabel = t.date ? `📅 ${formatDate(t.date)}` : '📅 ללא תאריך';
+    return `
+      <div class="task-item" id="task-${t.id}" style="flex-wrap:wrap; gap:8px;">
+        <span class="task-name">${escHtml(t.name)}</span>
+        <span class="status-pill ${statusClass}">${t.status}</span>
+        <div class="task-date">
+          <span class="date-label ${dClass}" id="dlabel-${t.id}">${dLabel}</span>
+          <button class="btn-date" onclick="postpone('${t.id}', '${t.date || ''}')">+7 ימים</button>
+          <button class="btn-date" onclick="toggleDatePicker('${t.id}')">📆 קבע</button>
+        </div>
+        <div class="date-picker-inline" id="dp-${t.id}">
+          <input type="date" class="date-input" id="di-${t.id}" value="${t.date || todayStr()}">
+          <button class="btn-date-confirm" onclick="setDate('${t.id}')">✓</button>
+        </div>
+        <button class="btn-done" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${label}</button>
+      </div>`;
+  }
+
+  function toggleDatePicker(id) {
+    document.getElementById(`dp-${id}`).classList.toggle('open');
+  }
+
+  async function postpone(itemId, currentDate) {
+    const newDate = addDays(currentDate, 7);
+    await updateDate(itemId, newDate);
+  }
+
+  async function setDate(itemId) {
+    const val = document.getElementById(`di-${itemId}`).value;
+    if (!val) return;
+    await updateDate(itemId, val);
+    document.getElementById(`dp-${itemId}`).classList.remove('open');
+  }
+
+  async function updateDate(itemId, date) {
+    try {
+      const res = await fetch(`${WORKER_URL}/update-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, date }),
+      });
+      if (!res.ok) throw new Error();
+      // עדכן מקומית
+      const task = allTasks.find(t => t.id === itemId);
+      if (task) {
+        task.date = date;
+        const dClass = dateClass(date);
+        const el = document.getElementById(`dlabel-${itemId}`);
+        if (el) { el.textContent = `📅 ${formatDate(date)}`; el.className = `date-label ${dClass}`; }
+        const di = document.getElementById(`di-${itemId}`);
+        if (di) di.value = date;
+      }
+      showToast(`תאריך עודכן ל-${formatDate(date)}`);
+    } catch {
+      showToast('שגיאה בעדכון תאריך');
+    }
+  }
+
+  function toggleProject(el, project) {
+    el.classList.toggle('open');
+    const list = el.nextElementSibling;
+    list.classList.toggle('open');
+    if (openProjects.has(project)) openProjects.delete(project);
+    else openProjects.add(project);
+  }
+
+  // ── Advance Status ──
+  async function advanceStatus(btn, itemId, name, currentStatus) {
+    const newStatus = nextStatus[currentStatus];
+    if (!newStatus) return;
+
+    btn.disabled = true;
+    btn.classList.add('completing');
+    btn.textContent = '...';
+
+    try {
+      const res = await fetch(`${WORKER_URL}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, newStatus }),
+      });
+      if (!res.ok) throw new Error();
+
+      if (newStatus === 'בוצע') {
+        // הסר מהרשימה
+        allTasks = allTasks.filter(t => t.id !== itemId);
+        const taskEl = document.getElementById(`task-${itemId}`);
+        taskEl.style.opacity = '0';
+        taskEl.style.transform = 'translateX(-10px)';
+        taskEl.style.transition = 'all 0.3s';
+        setTimeout(() => renderFiltered(), 300);
+        showToast(`✓ "${name}" הושלמה`);
+      } else {
+        // עדכן סטטוס מקומי ורנדר מחדש
+        const task = allTasks.find(t => t.id === itemId);
+        if (task) task.status = newStatus;
+        renderStats();
+        renderFiltered();
+        showToast(`"${name}" → ${newStatus}`);
+      }
+    } catch {
+      btn.disabled = false;
+      btn.classList.remove('completing');
+      btn.textContent = nextLabel[currentStatus] || '→';
+      showToast('שגיאה בעדכון הסטטוס');
+    }
+  }
+
+  // ── Toast ──
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ── Intro ──
+  const INTRO_EXPIRE = '2026-03-06'; // נעלם אוטומטית אחרי תאריך זה
+
+  function shouldShowIntro() {
+    const today = todayStr();
+    if (today >= INTRO_EXPIRE) return false;
+    return localStorage.getItem('yaron_intro_dismissed') !== '1';
+  }
+
+  function dismissIntro() {
+    localStorage.setItem('yaron_intro_dismissed', '1');
+    const overlay = document.getElementById('introOverlay');
+    overlay.style.transition = 'opacity 0.3s';
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.style.display = 'none', 300);
+  }
+
+  function enableIntroButton() {
+    const btn = document.getElementById('introConfirmBtn');
+    const msg = document.getElementById('introLoadingMsg');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    if (msg) { msg.innerHTML = '<span>✅ המשימות נטענו בהצלחה!</span>'; }
+  }
+
+  if (shouldShowIntro()) {
+    document.getElementById('introOverlay').style.display = 'flex';
+  }
+
+  loadTasks().then(() => {
+    enableIntroButton();
+  });
+
+</script>
+</body>
+</html>

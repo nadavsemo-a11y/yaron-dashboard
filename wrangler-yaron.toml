@@ -1,0 +1,12 @@
+name = "monday-yaron"
+main = "worker-yaron.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+MONDAY_BOARD_ID = "5089265830"
+MONDAY_SUBITEMS_BOARD_ID = "5089266636"
+MONDAY_STATUS_COLUMN_ID = "color_mkywhgg6"
+MONDAY_PERSON_COLUMN_ID = "multiple_person_mm062enq"
+MONDAY_STAGE_COLUMN_ID = "color_mkyw4sz5"
+
+# Secret - הוגדר עם: wrangler secret put MONDAY_API_TOKEN
