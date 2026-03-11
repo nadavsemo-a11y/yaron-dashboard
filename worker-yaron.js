@@ -16,7 +16,9 @@ export default {
       const url = new URL(request.url);
 
       // GET /items - Fetch Yaron's active subitems with pagination
+      // ?all=true → return ALL users' tasks (not just Yaron), except completed
       if (url.pathname === '/items' && request.method === 'GET') {
+        const showAll = url.searchParams.get('all') === 'true';
 
         let allItems = [];
         let cursor = null;
@@ -133,14 +135,15 @@ export default {
               const isYaron = personColumn && personColumn.text &&
                 personColumn.text.toLowerCase().includes('yaron shoshana');
 
-              // Include: assigned to Yaron + active statuses
+              // Include: assigned to Yaron (or all if showAll) + active statuses
               const dateColumn = subitem.column_values.find(
                 col => col.id === 'timerange_mkywwz1t'
               );
               const dateRaw = dateColumn ? dateColumn.text : '';
               const taskDate = dateRaw ? dateRaw.split(' - ')[0] : null;
 
-              if (isYaron && (status === 'ממתין' || status === 'בתהליך' || status === 'טרם החל')) {
+              const personMatch = showAll ? true : isYaron;
+              if (personMatch && (status === 'ממתין' || status === 'בתהליך' || status === 'טרם החל')) {
                 filteredTasks.push({
                   id: subitem.id,
                   name: subitem.name,
@@ -148,18 +151,14 @@ export default {
                   created_at: subitem.created_at,
                   status: status,
                   date: taskDate,
+                  person: personColumn ? personColumn.text : '',
                 });
               }
             }
           }
         }
 
-        // Sort by project name, then task name
-        filteredTasks.sort((a, b) => {
-          const projectCompare = a.parentName.localeCompare(b.parentName, 'he');
-          if (projectCompare !== 0) return projectCompare;
-          return a.name.localeCompare(b.name, 'he');
-        });
+        // Sorting is handled by the frontend
 
         return new Response(JSON.stringify(filteredTasks), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -178,7 +177,6 @@ export default {
           });
         }
 
-        // Monday requires JSON with "label" key for status columns
         const columnValue = JSON.stringify({ label: newStatus });
 
         const mutation = `
@@ -206,14 +204,11 @@ export default {
 
         const data = await response.json();
 
-        if (data.errors) {
-          return new Response(JSON.stringify({ error: 'Monday API Error', details: data.errors }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
-        }
-
-        return new Response(JSON.stringify({ success: true }), {
+        // Return full Monday response for debugging
+        return new Response(JSON.stringify({ 
+          success: !data.errors,
+          monday_response: data
+        }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

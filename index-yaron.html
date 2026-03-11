@@ -628,28 +628,184 @@
   }
   .toast.show { transform: translateX(-50%) translateY(0); }
 
-  /* ── Responsive ── */
-  @media (max-width: 600px) {
-    header, .controls, .stats-bar, .list-container { padding-right: 14px; padding-left: 14px; }
-    .controls { gap: 8px; }
-    .filter-select { min-width: 0; flex: 1; }
+  /* ── Checkbox ── */
+  .task-checkbox {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    appearance: none;
+    background: transparent;
+    transition: all 0.15s;
+    position: relative;
   }
+  .task-checkbox:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .task-checkbox:checked::after {
+    content: '✓';
+    position: absolute;
+    top: -1px;
+    left: 2px;
+    font-size: 12px;
+    color: white;
+    font-weight: 700;
+  }
+  .task-item.selected {
+    border-color: rgba(79,142,247,0.4) !important;
+    background: rgba(79,142,247,0.06) !important;
+  }
+
+  /* ── Bulk Action Bar (floating) ── */
+  .bulk-bar {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(120px);
+    background: #1e2235;
+    border: 1px solid rgba(79,142,247,0.4);
+    border-radius: 16px;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(79,142,247,0.15);
+    z-index: 500;
+    transition: transform 0.35s cubic-bezier(.34,1.56,.64,1);
+    white-space: nowrap;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 90vw;
+  }
+  .bulk-bar.visible { transform: translateX(-50%) translateY(0); }
+
+  .bulk-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    padding-left: 8px;
+    border-left: 1px solid var(--border);
+  }
+
+  .bulk-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+  }
+  .bulk-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .bulk-btn[style*="color:#f0a500"]:hover { opacity: 0.85; }
+  .bulk-btn[style*="color:#6dbf67"]:hover { opacity: 0.85; }
+  .bulk-btn.danger:hover { border-color: var(--status-new); color: var(--status-new); }
+  .bulk-btn.cancel { color: var(--text-muted); }
+  .bulk-btn.cancel:hover { color: var(--text); border-color: var(--border); }
+
+  /* ── Bulk Popup (modal) ── */
+  .bulk-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeInOverlay 0.2s ease;
+  }
+  .bulk-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    min-width: 280px;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: slideUp 0.25s cubic-bezier(.34,1.56,.64,1);
+  }
+  .bulk-modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .bulk-modal-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .bulk-option-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+    text-align: right;
+    width: 100%;
+  }
+  .bulk-option-btn:hover { border-color: var(--accent); background: rgba(79,142,247,0.08); }
+  .bulk-option-btn .opt-icon { font-size: 18px; flex-shrink: 0; }
+
+  .bulk-date-row {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-top: 4px;
+  }
+  .bulk-date-row.open { display: flex; }
+
+  .btn-bulk-cancel {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 8px;
+    padding: 9px;
+    font-size: 13px;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+    margin-top: 4px;
+  }
+  .btn-bulk-cancel:hover { color: var(--text); }
 </style>
 </head>
 <body>
 
 <div class="intro-overlay" id="introOverlay" style="display:none;">
   <div class="intro-box">
-    <div class="intro-avatar">👋</div>
-    <div class="intro-title">שלום ירון!</div>
-    <div class="intro-sub">בזמן שהמשימות שלך נטענות — שניה אחת להכיר את המערכת</div>
+    <div class="intro-avatar">🚀</div>
+    <div class="intro-title">עדכון חדש!</div>
+    <div class="intro-sub">מה חדש בגרסה הזו</div>
 
     <ul class="intro-list">
-      <li><span class="icon">📋</span><span>המערכת מציגה את <strong>כל המשימות הפתוחות שמשויכות אליך</strong> — ממתין, בתהליך, וטרם החל.</span></li>
-      <li><span class="icon">📁</span><span>המשימות מאורגנות <strong>לפי פרויקט</strong>. לחץ על שם פרויקט כדי לפתוח או לסגור את רשימת המשימות שלו.</span></li>
-      <li><span class="icon">▶️</span><span>כל משימה מציגה את <strong>השלב הבא</strong> שניתן ללחוץ עליו כדי להתקדם: טרם החל → ממתין → בתהליך → בוצע.</span></li>
-      <li><span class="icon">📅</span><span>ניתן <strong>לדחות תאריך בשבוע</strong> או <strong>לקבוע תאריך ידני</strong> לכל משימה.</span></li>
-      <li><span class="icon">🔍</span><span>יש <strong>חיפוש חופשי</strong>, סינון לפי סטטוס ופרויקט, ואפשרות להציג <strong>רק משימות מהיום ואילך</strong>.</span></li>
+      <li><span class="icon">⚡</span><span><strong>כפתורי סטטוס מהירים</strong> — סמן משימות ושנה ישירות ל"ממתין" או "בוצע" בלחיצה אחת.</span></li>
+      <li><span class="icon">👥</span><span><strong>תצוגת כל הצוות</strong> — טוגל חדש להציג את כל המשימות בפרויקטים (לא רק שלך), למעט הושלם.</span></li>
+      <li><span class="icon">☑️</span><span><strong>בחירה מרובה</strong> — סמן כמה משימות עם checkbox ובצע עליהן שינוי סטטוס או תאריך בבת אחת.</span></li>
+      <li><span class="icon">📅</span><span><strong>שינוי תאריך שודרג</strong> — תפריט נקי עם +1/+7/+30 ימים ובחירה ידנית.</span></li>
     </ul>
 
     <hr class="intro-divider">
@@ -698,6 +854,10 @@
     <div class="toggle" id="todayToggle"></div>
     <span id="todayLabel">מהיום בלבד</span>
   </label>
+  <label class="toggle-wrap" onclick="toggleAllTasks()">
+    <div class="toggle" id="allTasksToggle"></div>
+    <span>כל המשימות (כולל צוות)</span>
+  </label>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -710,6 +870,25 @@
   </div>
 </div>
 
+<!-- Bulk Action Bar -->
+<div class="bulk-bar" id="bulkBar">
+  <span class="bulk-count" id="bulkCount">0 נבחרו</span>
+  <button class="bulk-btn" onclick="bulkUpdateStatus('ממתין')" style="border-color:rgba(240,165,0,0.4);color:#f0a500;">⏳ ממתין</button>
+  <button class="bulk-btn" onclick="bulkUpdateStatus('בוצע')" style="border-color:rgba(109,191,103,0.4);color:#6dbf67;">✓ בוצע</button>
+  <button class="bulk-btn" onclick="openBulkModal('status')">🔄 סטטוס אחר</button>
+  <button class="bulk-btn" onclick="openBulkModal('date')">📅 שינוי תאריך</button>
+  <button class="bulk-btn cancel" onclick="clearSelection()">✕ ביטול</button>
+</div>
+
+<!-- Bulk Modal -->
+<div class="bulk-modal-overlay" id="bulkModalOverlay" style="display:none;" onclick="closeBulkModal(event)">
+  <div class="bulk-modal" id="bulkModal">
+    <div class="bulk-modal-title" id="bulkModalTitle">שינוי סטטוס</div>
+    <div class="bulk-modal-options" id="bulkModalOptions"></div>
+    <button class="btn-bulk-cancel" onclick="closeBulkModal()">ביטול</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -718,6 +897,8 @@
   let allTasks = [];
   let openProjects = new Set();
   let filterFromToday = false;
+  let showAllTasks = false;
+  let selectedIds = new Set();
 
   function todayStr() {
     return new Date().toISOString().split('T')[0];
@@ -751,7 +932,7 @@
       </div>`;
 
     try {
-      const res = await fetch(`${WORKER_URL}/items`);
+      const res = await fetch(`${WORKER_URL}/items${showAllTasks ? '?all=true' : ''}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       allTasks = await res.json();
 
@@ -841,13 +1022,27 @@
       grouped[t.parentName].push(t);
     });
 
-    // Sort projects א-ב, tasks within each project by date
-    const sortedProjects = Object.keys(grouped).sort((a, b) => a.localeCompare(b, 'he'));
+    // Sort projects א-ב (manual Hebrew sort)
+    const hebrewOrder = 'אבגדהוזחטיכלמנסעפצקרשת';
+    function hebrewSort(a, b) {
+      const sa = a.replace(/['"()\[\]]/g, '').trim();
+      const sb = b.replace(/['"()\[\]]/g, '').trim();
+      for (let i = 0; i < Math.min(sa.length, sb.length); i++) {
+        const ia = hebrewOrder.indexOf(sa[i]);
+        const ib = hebrewOrder.indexOf(sb[i]);
+        if (ia === -1 && ib === -1) { if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1; continue; }
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        if (ia !== ib) return ia - ib;
+      }
+      return sa.length - sb.length;
+    }
+    const sortedProjects = Object.keys(grouped).sort(hebrewSort);
     sortedProjects.forEach(p => {
       grouped[p].sort((a, b) => {
         if (!a.date && !b.date) return 0;
-        if (!a.date) return -1;
-        if (!b.date) return 1;
+        if (!a.date) return 1;
+        if (!b.date) return -1;
         return a.date.localeCompare(b.date);
       });
     });
@@ -888,6 +1083,12 @@
     renderFiltered();
   }
 
+  function toggleAllTasks() {
+    showAllTasks = !showAllTasks;
+    document.getElementById('allTasksToggle').classList.toggle('on', showAllTasks);
+    loadTasks();
+  }
+
   function taskHtml(t) {
     const statusClass = `status-${t.status}`;
     const label = nextLabel[t.status] || '→';
@@ -897,9 +1098,12 @@
     const advClass = isDone ? 'btn-advance btn-advance-done btn-advance-done-bold' :
                      t.status === 'ממתין' ? 'btn-advance btn-advance-prog' : 'btn-advance btn-advance-start';
     const overdueRow = (!t.date || t.date < todayStr()) ? ' overdue' : '';
+    const isSelected = selectedIds.has(t.id) ? ' selected' : '';
+    const checked = selectedIds.has(t.id) ? 'checked' : '';
     return `
-      <div class="task-item${overdueRow}" id="task-${t.id}">
-        <span class="task-name">${escHtml(t.name)}</span>
+      <div class="task-item${overdueRow}${isSelected}" id="task-${t.id}">
+        <input type="checkbox" class="task-checkbox" ${checked} onchange="toggleSelect('${t.id}', this)" onclick="event.stopPropagation()">
+        <span class="task-name">${escHtml(t.name)}${showAllTasks && t.person ? ' <span style="color:var(--text-muted);font-size:11px;">(' + escHtml(t.person) + ')</span>' : ''}</span>
         <span class="status-pill ${statusClass}">${t.status}</span>
         <div class="task-actions">
           <span class="date-chip ${dClass}" id="dlabel-${t.id}">📅 ${dLabel}</span>
@@ -1043,6 +1247,132 @@
     }
   }
 
+  // ── Selection ──
+  function toggleSelect(id, cb) {
+    if (cb.checked) selectedIds.add(id);
+    else selectedIds.delete(id);
+    const taskEl = document.getElementById('task-' + id);
+    if (taskEl) taskEl.classList.toggle('selected', cb.checked);
+    updateBulkBar();
+  }
+
+  function clearSelection() {
+    selectedIds.clear();
+    document.querySelectorAll('.task-checkbox').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.task-item.selected').forEach(el => el.classList.remove('selected'));
+    updateBulkBar();
+  }
+
+  function updateBulkBar() {
+    const bar = document.getElementById('bulkBar');
+    const count = document.getElementById('bulkCount');
+    count.textContent = selectedIds.size + ' נבחרו';
+    bar.classList.toggle('visible', selectedIds.size > 0);
+  }
+
+  // ── Bulk Modal ──
+  function openBulkModal(type) {
+    const overlay = document.getElementById('bulkModalOverlay');
+    const title = document.getElementById('bulkModalTitle');
+    const options = document.getElementById('bulkModalOptions');
+    overlay.style.display = 'flex';
+
+    if (type === 'status') {
+      title.textContent = 'שינוי סטטוס ל-' + selectedIds.size + ' משימות';
+      options.innerHTML = `
+        <button class="bulk-option-btn" onclick="bulkUpdateStatus('ממתין')"><span class="opt-icon">⏳</span> ממתין</button>
+        <button class="bulk-option-btn" onclick="bulkUpdateStatus('בתהליך')"><span class="opt-icon">🔄</span> בתהליך</button>
+        <button class="bulk-option-btn" onclick="bulkUpdateStatus('טרם החל')"><span class="opt-icon">🟢</span> טרם החל</button>
+        <button class="bulk-option-btn" onclick="bulkUpdateStatus('בוצע')" style="color:#6dbf67"><span class="opt-icon">✅</span> בוצע (הסר מהרשימה)</button>
+      `;
+    } else {
+      title.textContent = 'שינוי תאריך ל-' + selectedIds.size + ' משימות';
+      options.innerHTML = `
+        <button class="bulk-option-btn" onclick="bulkUpdateDate(1)"><span class="opt-icon">📅</span> דחייה ביום אחד</button>
+        <button class="bulk-option-btn" onclick="bulkUpdateDate(7)"><span class="opt-icon">📅</span> דחייה בשבוע</button>
+        <button class="bulk-option-btn" onclick="bulkUpdateDate(30)"><span class="opt-icon">📅</span> דחייה בחודש</button>
+        <button class="bulk-option-btn" onclick="document.getElementById('bulkDateRow').classList.toggle('open')"><span class="opt-icon">✍️</span> תאריך ידני</button>
+        <div class="bulk-date-row" id="bulkDateRow">
+          <input type="date" class="date-input" id="bulkDateInput" value="${todayStr()}" style="flex:1">
+          <button class="btn-date-confirm" onclick="bulkUpdateDateManual()">✓ קבע</button>
+        </div>
+      `;
+    }
+  }
+
+  function closeBulkModal(event) {
+    if (event && event.target !== document.getElementById('bulkModalOverlay')) return;
+    document.getElementById('bulkModalOverlay').style.display = 'none';
+  }
+
+  async function bulkUpdateStatus(newStatus) {
+    document.getElementById('bulkModalOverlay').style.display = 'none';
+    const ids = [...selectedIds];
+    showToast('מעדכן ' + ids.length + ' משימות...');
+
+    await Promise.all(ids.map(id =>
+      fetch(`${WORKER_URL}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: id, newStatus }),
+      })
+    ));
+
+    if (newStatus === 'בוצע') {
+      allTasks = allTasks.filter(t => !selectedIds.has(t.id));
+    } else {
+      allTasks.forEach(t => { if (selectedIds.has(t.id)) t.status = newStatus; });
+    }
+
+    clearSelection();
+    renderStats();
+    renderFiltered();
+    showToast('✓ ' + ids.length + ' משימות עודכנו ל' + newStatus);
+  }
+
+  async function bulkUpdateDate(days) {
+    document.getElementById('bulkModalOverlay').style.display = 'none';
+    const ids = [...selectedIds];
+    showToast('מעדכן תאריכים...');
+
+    await Promise.all(ids.map(id => {
+      const task = allTasks.find(t => t.id === id);
+      const newDate = addDays(task ? task.date : '', days);
+      if (task) task.date = newDate;
+      return fetch(`${WORKER_URL}/update-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: id, date: newDate }),
+      });
+    }));
+
+    clearSelection();
+    renderFiltered();
+    showToast('✓ תאריכים עודכנו');
+  }
+
+  async function bulkUpdateDateManual() {
+    const val = document.getElementById('bulkDateInput').value;
+    if (!val) return;
+    document.getElementById('bulkModalOverlay').style.display = 'none';
+    const ids = [...selectedIds];
+    showToast('מעדכן תאריכים...');
+
+    await Promise.all(ids.map(id => {
+      const task = allTasks.find(t => t.id === id);
+      if (task) task.date = val;
+      return fetch(`${WORKER_URL}/update-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: id, date: val }),
+      });
+    }));
+
+    clearSelection();
+    renderFiltered();
+    showToast('✓ תאריכים עודכנו ל-' + formatDate(val));
+  }
+
   // ── Toast ──
   function showToast(msg) {
     const t = document.getElementById('toast');
@@ -1056,16 +1386,14 @@
   }
 
   // ── Intro ──
-  const INTRO_EXPIRE = '2026-03-06'; // נעלם אוטומטית אחרי תאריך זה
+  const INTRO_VERSION = 'v4-bulk-quick-all-tasks';
 
   function shouldShowIntro() {
-    const today = todayStr();
-    if (today >= INTRO_EXPIRE) return false;
-    return localStorage.getItem('yaron_intro_dismissed') !== '1';
+    return localStorage.getItem('yaron_intro_version') !== INTRO_VERSION;
   }
 
   function dismissIntro() {
-    localStorage.setItem('yaron_intro_dismissed', '1');
+    localStorage.setItem('yaron_intro_version', INTRO_VERSION);
     const overlay = document.getElementById('introOverlay');
     overlay.style.transition = 'opacity 0.3s';
     overlay.style.opacity = '0';
