@@ -1038,14 +1038,7 @@
       return sa.length - sb.length;
     }
     const sortedProjects = Object.keys(grouped).sort(hebrewSort);
-    sortedProjects.forEach(p => {
-      grouped[p].sort((a, b) => {
-        if (!a.date && !b.date) return 0;
-        if (!a.date) return 1;
-        if (!b.date) return -1;
-        return a.date.localeCompare(b.date);
-      });
-    });
+    // Tasks keep their original Monday.com order (no re-sorting)
 
     const html = sortedProjects.map(project => {
       const items = grouped[project];
