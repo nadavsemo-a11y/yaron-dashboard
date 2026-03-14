@@ -365,6 +365,33 @@
     font-weight: 600;
   }
 
+  /* ── Action Buttons (WhatsApp etc.) ── */
+  .btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(37,211,102,0.35);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: rgba(37,211,102,0.1);
+    color: #25d366;
+    text-decoration: none;
+  }
+  .btn-action:hover {
+    background: rgba(37,211,102,0.22);
+    border-color: rgba(37,211,102,0.5);
+  }
+  .btn-action .wa-icon {
+    font-size: 14px;
+  }
+
   /* ── Status advance button ── */
   .btn-advance {
     display: flex;
@@ -965,6 +992,7 @@
   const WORKER_URL = 'https://monday-yaron.monday-shimrit.workers.dev';
 
   let allTasks = [];
+  let allButtons = [];
   let openProjects = new Set();
   let filterFromToday = false;
   let showAllTasks = false;
@@ -1002,9 +1030,14 @@
       </div>`;
 
     try {
-      const res = await fetch(`${WORKER_URL}/items${showAllTasks ? '?all=true' : ''}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      allTasks = await res.json();
+      // Load tasks and buttons in parallel
+      const [tasksRes, buttonsRes] = await Promise.all([
+        fetch(`${WORKER_URL}/items${showAllTasks ? '?all=true' : ''}`),
+        allButtons.length === 0 ? fetch(`${WORKER_URL}/buttons`) : Promise.resolve(null),
+      ]);
+      if (!tasksRes.ok) throw new Error(`HTTP ${tasksRes.status}`);
+      allTasks = await tasksRes.json();
+      if (buttonsRes && buttonsRes.ok) allButtons = await buttonsRes.json();
 
       populateProjectFilter();
       renderStats();
@@ -1176,6 +1209,69 @@
     loadTasks();
   }
 
+  // ── Action Buttons (WhatsApp) ──
+  function getButtonsForTask(taskName) {
+    return allButtons.filter(b =>
+      taskName.toLowerCase().includes(b.matchText.toLowerCase())
+    );
+  }
+
+  function buildMessage(template, info, projectName, supplier) {
+    if (!template) return '';
+    return template
+      .replace(/\{שם_פרויקט\}/g, projectName || '')
+      .replace(/\{כתובת\}/g, info.address || '')
+      .replace(/\{dc\}/g, info.dc ? info.dc + ' kWp' : '')
+      .replace(/\{ac\}/g, info.ac ? info.ac + ' kW' : '')
+      .replace(/\{ממיר\}/g, info.inverter || '')
+      .replace(/\{פאנל\}/g, info.panel || '')
+      .replace(/\{סוג_גג\}/g, info.roofType || '')
+      .replace(/\{חיבור\}/g, info.connectionSize || '')
+      .replace(/\{שלב\}/g, info.stage || '')
+      .replace(/\{טלפון\}/g, info.phone || '')
+      .replace(/\{ספק\}/g, supplier || '');
+  }
+
+  function formatPhone(phone) {
+    if (!phone) return '';
+    let p = phone.replace(/[^0-9+]/g, '');
+    if (p.startsWith('0')) p = '972' + p.slice(1);
+    if (!p.startsWith('+') && !p.startsWith('972')) p = '972' + p;
+    p = p.replace(/^\+/, '');
+    return p;
+  }
+
+  function actionButtonsHtml(task) {
+    const buttons = getButtonsForTask(task.name);
+    if (buttons.length === 0) return '';
+    const info = task.parentInfo || {};
+    return buttons.map(b => {
+      const msg = buildMessage(b.template, info, task.parentName, task.supplier);
+      const phone = formatPhone(b.phone);
+      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+      return `<a class="btn-action" href="${waUrl}" target="_blank" onclick="event.stopPropagation(); actionButtonClicked('${task.id}', '${escHtml(task.name)}')">
+        <span class="wa-icon">📱</span>${escHtml(b.buttonLabel)}
+      </a>`;
+    }).join('');
+  }
+
+  // After clicking an action button, advance status to בתהליך
+  async function actionButtonClicked(itemId, name) {
+    const task = allTasks.find(t => t.id === itemId);
+    if (!task || task.status === 'בתהליך' || task.status === 'בוצע') return;
+    try {
+      await fetch(`${WORKER_URL}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, newStatus: 'בתהליך' }),
+      });
+      task.status = 'בתהליך';
+      renderStats();
+      renderFiltered();
+      showToast(`"${name}" → בתהליך`);
+    } catch {}
+  }
+
   // ── Project Info Card ──
   const stageColors = {
     'טרום': '#c4c4c4', 'תכנון': '#579bfc', 'רכש': '#fdab3d',
@@ -1257,6 +1353,7 @@
             </div>
           </div>
         </div>
+        ${actionButtonsHtml(t)}
         <button class="${advClass}" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${label}</button>
       </div>`;
   }

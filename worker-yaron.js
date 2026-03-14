@@ -136,6 +136,7 @@ export default {
             panel: getCol('text_mm1besx6'),          // דגם פאנל
             roofType: getCol('dropdown_mkywtpq4'),  // סוג גג
             address: getCol('lookup_mkywmsse'),     // כתובת
+            phone: getCol('lookup_mkyw3bhw'),       // טלפון לקוח (mirror)
             stage: parentStage,                      // שלב
           };
 
@@ -159,6 +160,12 @@ export default {
               const dateRaw = dateColumn ? dateColumn.text : '';
               const taskDate = dateRaw ? dateRaw.split(' - ')[0] : null;
 
+              // Get supplier name from subitem
+              const supplierColumn = subitem.column_values.find(
+                col => col.id === 'board_relation_mkyw3bx3'
+              );
+              const supplier = supplierColumn ? supplierColumn.text : '';
+
               const personMatch = showAll ? true : isYaron;
               if (personMatch && (status === 'ממתין' || status === 'בתהליך' || status === 'טרם החל')) {
                 filteredTasks.push({
@@ -170,6 +177,7 @@ export default {
                   status: status,
                   date: taskDate,
                   person: personColumn ? personColumn.text : '',
+                  supplier: supplier,
                 });
               }
             }
@@ -270,6 +278,74 @@ export default {
         }
 
         return new Response(JSON.stringify({ success: true, date }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // GET /buttons - Fetch button configurations from Monday
+      if (url.pathname === '/buttons' && request.method === 'GET') {
+        const query = `
+          query {
+            boards(ids: ${env.MONDAY_BUTTONS_BOARD_ID}) {
+              items_page(limit: 500) {
+                items {
+                  id
+                  name
+                  column_values {
+                    id
+                    text
+                    value
+                  }
+                }
+              }
+            }
+          }
+        `;
+
+        const response = await fetch('https://api.monday.com/v2', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': env.MONDAY_API_TOKEN,
+            'API-Version': '2024-10'
+          },
+          body: JSON.stringify({ query }),
+        });
+
+        const data = await response.json();
+
+        if (data.errors) {
+          return new Response(JSON.stringify({ error: 'Monday API Error', details: data.errors }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const buttons = data.data.boards[0].items_page.items.map(item => {
+          const getCol = (id) => {
+            const col = item.column_values.find(c => c.id === id);
+            return col ? col.text : '';
+          };
+          const getVal = (id) => {
+            const col = item.column_values.find(c => c.id === id);
+            if (!col || !col.value) return null;
+            try { return JSON.parse(col.value); } catch { return null; }
+          };
+
+          // Extract phone - the phone column stores as JSON with phone and countryShortName
+          const phoneVal = getVal('phone_mm1e9d07');
+          const phone = phoneVal ? phoneVal.phone : getCol('phone_mm1e9d07');
+
+          return {
+            id: item.id,
+            matchText: item.name,                       // שם הפריט = טקסט להתאמה
+            buttonLabel: getCol('text_mm1e88wt'),       // טקסט כפתור
+            phone: phone,                                // טלפון
+            template: getCol('long_text_mm1ebfws'),     // תבנית הודעה
+          };
+        }).filter(b => b.matchText && b.buttonLabel);
+
+        return new Response(JSON.stringify(buttons), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

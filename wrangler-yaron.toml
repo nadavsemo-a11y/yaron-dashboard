@@ -8,5 +8,6 @@ MONDAY_SUBITEMS_BOARD_ID = "5089266636"
 MONDAY_STATUS_COLUMN_ID = "color_mkywhgg6"
 MONDAY_PERSON_COLUMN_ID = "multiple_person_mm062enq"
 MONDAY_STAGE_COLUMN_ID = "color_mkyw4sz5"
+MONDAY_BUTTONS_BOARD_ID = "5093182974"
 
 # Secret - הוגדר עם: wrangler secret put MONDAY_API_TOKEN
