@@ -55,14 +55,11 @@
     gap: 14px;
   }
 
-  .avatar {
+  .header-logo {
     width: 40px;
     height: 40px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border-radius: 8px;
+    object-fit: contain;
     font-weight: 700;
     font-size: 16px;
     flex-shrink: 0;
@@ -300,6 +297,73 @@
   .status-ממתין { background: rgba(240,165,0,0.15); color: var(--status-wait); border: 1px solid rgba(240,165,0,0.3); }
   .status-בתהליך { background: rgba(79,142,247,0.15); color: var(--status-progress); border: 1px solid rgba(79,142,247,0.3); }
   .status-טרם\ החל { background: rgba(109,191,103,0.15); color: var(--status-new); border: 1px solid rgba(109,191,103,0.3); }
+
+  /* ── DC Badge ── */
+  .dc-badge {
+    display: inline-block;
+    background: rgba(79,142,247,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(79,142,247,0.25);
+    border-radius: 6px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+
+  /* ── Project Info Card ── */
+  .project-info-card {
+    background: linear-gradient(135deg, rgba(79,142,247,0.06), rgba(124,92,191,0.06));
+    border: 1px solid rgba(79,142,247,0.15);
+    border-radius: 10px;
+    margin: 0 12px 8px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px 16px;
+    animation: slideDown 0.25s ease;
+  }
+  @keyframes slideDown { from { opacity:0; max-height:0; padding:0 16px; } to { opacity:1; max-height:200px; } }
+
+  .info-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+  .info-item .info-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+  }
+  .info-item .info-label {
+    color: var(--text-muted);
+    font-weight: 400;
+    white-space: nowrap;
+  }
+  .info-item .info-value {
+    color: var(--text);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .info-item .info-value:empty::after {
+    content: '—';
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  /* ── Stage badge in info card ── */
+  .stage-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
 
   /* ── Status advance button ── */
   .btn-advance {
@@ -797,7 +861,7 @@
 
 <div class="intro-overlay" id="introOverlay" style="display:none;">
   <div class="intro-box">
-    <div class="intro-avatar">🚀</div>
+    <div class="intro-avatar">⚡</div>
     <div class="intro-title">עדכון חדש!</div>
     <div class="intro-sub">מה חדש בגרסה הזו</div>
 
@@ -822,7 +886,8 @@
 
 <header>
   <div class="header-left">
-    <div class="avatar">יש</div>
+    <img class="header-logo" src="data:image/png;base64,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" alt="A.G.S"
+    >
     <div>
       <div class="header-name">ירון שושנה</div>
       <div class="header-sub">לוח משימות</div>
@@ -858,6 +923,11 @@
     <div class="toggle" id="allTasksToggle"></div>
     <span>כל המשימות (כולל צוות)</span>
   </label>
+  <select class="filter-select" id="sortSelect" onchange="renderFiltered()">
+    <option value="abc">מיון: א-ב</option>
+    <option value="newest">מיון: חדש → ישן</option>
+    <option value="tasks">מיון: מס׳ משימות</option>
+  </select>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -956,12 +1026,15 @@
   function populateProjectFilter() {
     const projects = [...new Set(allTasks.map(t => t.parentName))].sort((a, b) =>
       a.localeCompare(b, 'he'));
+    // Build DC lookup for dropdown
+    const dcLookup = {};
+    allTasks.forEach(t => { if (t.parentInfo && t.parentInfo.dc && !dcLookup[t.parentName]) dcLookup[t.parentName] = t.parentInfo.dc; });
     const sel = document.getElementById('projectFilter');
     sel.innerHTML = '<option value="">כל הפרויקטים</option>';
     projects.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p;
-      opt.textContent = p;
+      opt.textContent = dcLookup[p] ? `${p} (${dcLookup[p]} kWp)` : p;
       sel.appendChild(opt);
     });
   }
@@ -1015,14 +1088,17 @@
       return;
     }
 
-    // Group by project
+    // Group by project, collect info per project
     const grouped = {};
+    const projectInfo = {};
     tasks.forEach(t => {
       if (!grouped[t.parentName]) grouped[t.parentName] = [];
       grouped[t.parentName].push(t);
+      if (t.parentInfo && !projectInfo[t.parentName]) projectInfo[t.parentName] = t.parentInfo;
     });
 
-    // Sort projects א-ב (manual Hebrew sort)
+    // Sort projects based on selected sort option
+    const sortMode = document.getElementById('sortSelect').value;
     const hebrewOrder = 'אבגדהוזחטיכלמנסעפצקרשת';
     function hebrewSort(a, b) {
       const sa = a.replace(/['"()\[\]]/g, '').trim();
@@ -1037,20 +1113,38 @@
       }
       return sa.length - sb.length;
     }
-    const sortedProjects = Object.keys(grouped).sort(hebrewSort);
+
+    let sortedProjects;
+    if (sortMode === 'newest') {
+      // Sort by newest task creation date (newest project first)
+      sortedProjects = Object.keys(grouped).sort((a, b) => {
+        const newestA = grouped[a].reduce((max, t) => t.created_at > max ? t.created_at : max, '');
+        const newestB = grouped[b].reduce((max, t) => t.created_at > max ? t.created_at : max, '');
+        return newestB.localeCompare(newestA);
+      });
+    } else if (sortMode === 'tasks') {
+      // Sort by number of tasks (most tasks first)
+      sortedProjects = Object.keys(grouped).sort((a, b) => grouped[b].length - grouped[a].length);
+    } else {
+      // Default: א-ב
+      sortedProjects = Object.keys(grouped).sort(hebrewSort);
+    }
     // Tasks keep their original Monday.com order (no re-sorting)
 
     const html = sortedProjects.map(project => {
       const items = grouped[project];
       const isOpen = openProjects.has(project) || search;
+      const info = projectInfo[project] || {};
+      const dcBadge = info.dc ? `<span class="dc-badge">${escHtml(info.dc)} kWp</span>` : '';
       return `
         <div class="project-group">
           <div class="project-header ${isOpen ? 'open' : ''}" onclick="toggleProject(this, '${escHtml(project)}')">
-            <span class="project-name">${escHtml(project)}</span>
+            <span class="project-name">${escHtml(project)}${dcBadge}</span>
             <span class="project-count">${items.length}</span>
             <span class="project-chevron">▼</span>
           </div>
           <div class="tasks-list ${isOpen ? 'open' : ''}">
+            ${isOpen ? buildInfoCard(info) : ''}
             ${items.map(t => taskHtml(t)).join('')}
           </div>
         </div>`;
@@ -1080,6 +1174,46 @@
     showAllTasks = !showAllTasks;
     document.getElementById('allTasksToggle').classList.toggle('on', showAllTasks);
     loadTasks();
+  }
+
+  // ── Project Info Card ──
+  const stageColors = {
+    'טרום': '#c4c4c4', 'תכנון': '#579bfc', 'רכש': '#fdab3d',
+    'התקנות': '#ff6d3b', 'בדיקות': '#ff7575', 'סגירה': '#037f4c',
+    'הושלם': '#00c875', 'תבנית': '#757575'
+  };
+
+  function buildInfoCard(info) {
+    if (!info || (!info.dc && !info.ac && !info.inverter && !info.panel && !info.address && !info.roofType && !info.connectionSize && !info.stage)) {
+      return '';
+    }
+    const stageColor = stageColors[info.stage] || '#c4c4c4';
+    const stageBadge = info.stage
+      ? `<span class="stage-badge" style="background:${stageColor}22;color:${stageColor};border:1px solid ${stageColor}44">${escHtml(info.stage)}</span>`
+      : '';
+
+    const fields = [
+      { icon: '📍', label: 'כתובת', value: info.address },
+      { icon: '📊', label: 'שלב', value: stageBadge, raw: true },
+      { icon: '⚡', label: 'הספק DC', value: info.dc ? info.dc + ' kWp' : '' },
+      { icon: '🔌', label: 'הספק AC', value: info.ac ? info.ac + ' kW' : '' },
+      { icon: '🔗', label: 'גודל חיבור', value: info.connectionSize },
+      { icon: '🏠', label: 'סוג גג', value: info.roofType },
+      { icon: '🔄', label: 'דגם ממיר', value: info.inverter },
+      { icon: '☀️', label: 'דגם פאנל', value: info.panel },
+    ];
+
+    const items = fields
+      .filter(f => f.value)
+      .map(f => `
+        <div class="info-item">
+          <span class="info-icon">${f.icon}</span>
+          <span class="info-label">${f.label}:</span>
+          <span class="info-value">${f.raw ? f.value : escHtml(f.value)}</span>
+        </div>`).join('');
+
+    if (!items) return '';
+    return `<div class="project-info-card">${items}</div>`;
   }
 
   function taskHtml(t) {
@@ -1191,11 +1325,15 @@
   }
 
   function toggleProject(el, project) {
-    el.classList.toggle('open');
-    const list = el.nextElementSibling;
-    list.classList.toggle('open');
-    if (openProjects.has(project)) openProjects.delete(project);
-    else openProjects.add(project);
+    if (openProjects.has(project)) {
+      openProjects.delete(project);
+      el.classList.remove('open');
+      el.nextElementSibling.classList.remove('open');
+    } else {
+      openProjects.add(project);
+      // Re-render to build info card
+      renderFiltered();
+    }
   }
 
   // ── Advance Status ──

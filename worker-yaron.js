@@ -122,6 +122,23 @@ export default {
           // Skip completed projects
           if (parentStage === 'הושלם') continue;
 
+          // Extract technical info from parent project
+          const getCol = (id) => {
+            const col = item.column_values.find(c => c.id === id);
+            return col ? col.text : '';
+          };
+          const parentInfo = {
+            dc: getCol('numeric_mm1bdmv6'),        // הספק DC
+            ac: getCol('numeric_mkyxfrg9'),         // הספק AC
+            capacity: getCol('numeric_mkyw4dcb'),   // הספק (kWp)
+            connectionSize: getCol('text_mm1b1hq5'),// גודל חיבור
+            inverter: getCol('text_mm1b2dx7'),      // דגם ממיר
+            panel: getCol('text_mm1besx6'),          // דגם פאנל
+            roofType: getCol('dropdown_mkywtpq4'),  // סוג גג
+            address: getCol('lookup_mkywmsse'),     // כתובת
+            stage: parentStage,                      // שלב
+          };
+
           if (item.subitems && item.subitems.length > 0) {
             for (const subitem of item.subitems) {
               const personColumn = subitem.column_values.find(
@@ -148,6 +165,7 @@ export default {
                   id: subitem.id,
                   name: subitem.name,
                   parentName: item.name,
+                  parentInfo: parentInfo,
                   created_at: subitem.created_at,
                   status: status,
                   date: taskDate,
