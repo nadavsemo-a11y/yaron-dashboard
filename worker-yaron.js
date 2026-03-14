@@ -26,59 +26,32 @@ export default {
 
         // Paginate through ALL items (500 per page)
         while (hasMore) {
+          const itemsFragment = `
+            items {
+              id
+              name
+              column_values {
+                id
+                text
+              }
+              subitems {
+                id
+                name
+                created_at
+                column_values {
+                  id
+                  text
+                  ... on BoardRelationValue {
+                    display_value
+                    linked_item_ids
+                  }
+                }
+              }
+            }
+          `;
           const query = cursor
-            ? `
-              query {
-                boards(ids: ${env.MONDAY_BOARD_ID}) {
-                  items_page(limit: 500, cursor: "${cursor}") {
-                    cursor
-                    items {
-                      id
-                      name
-                      column_values {
-                        id
-                        text
-                      }
-                      subitems {
-                        id
-                        name
-                        created_at
-                        column_values {
-                          id
-                          text
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            `
-            : `
-              query {
-                boards(ids: ${env.MONDAY_BOARD_ID}) {
-                  items_page(limit: 500) {
-                    cursor
-                    items {
-                      id
-                      name
-                      column_values {
-                        id
-                        text
-                      }
-                      subitems {
-                        id
-                        name
-                        created_at
-                        column_values {
-                          id
-                          text
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            `;
+            ? `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500, cursor: "${cursor}") { cursor ${itemsFragment} } } }`
+            : `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500) { cursor ${itemsFragment} } } }`;
 
           const response = await fetch('https://api.monday.com/v2', {
             method: 'POST',
@@ -109,6 +82,45 @@ export default {
           }
         }
 
+        // Fetch suppliers with phone numbers (board 5089266595)
+        const suppliersQuery = `
+          query {
+            boards(ids: 5089266595) {
+              items_page(limit: 500) {
+                items {
+                  id
+                  name
+                  column_values(ids: ["phone_mkywgg4z"]) {
+                    text
+                    value
+                  }
+                }
+              }
+            }
+          }
+        `;
+        const suppRes = await fetch('https://api.monday.com/v2', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': env.MONDAY_API_TOKEN,
+            'API-Version': '2024-10'
+          },
+          body: JSON.stringify({ query: suppliersQuery }),
+        });
+        const suppData = await suppRes.json();
+        const supplierMap = {};
+        if (suppData.data) {
+          for (const s of suppData.data.boards[0].items_page.items) {
+            const phoneCol = s.column_values[0];
+            let phone = phoneCol ? phoneCol.text : '';
+            if (!phone && phoneCol && phoneCol.value) {
+              try { phone = JSON.parse(phoneCol.value).phone || ''; } catch {}
+            }
+            supplierMap[s.name] = { phone };
+          }
+        }
+
         // Now filter subitems assigned to YARON SHOSHANA
         const filteredTasks = [];
 
@@ -125,7 +137,8 @@ export default {
           // Extract technical info from parent project
           const getCol = (id) => {
             const col = item.column_values.find(c => c.id === id);
-            return col ? col.text : '';
+            if (!col || !col.text || col.text === 'None') return '';
+            return col.text;
           };
           const parentInfo = {
             dc: getCol('numeric_mm1bdmv6'),        // הספק DC
@@ -136,7 +149,7 @@ export default {
             panel: getCol('text_mm1besx6'),          // דגם פאנל
             roofType: getCol('dropdown_mkywtpq4'),  // סוג גג
             address: getCol('lookup_mkywmsse'),     // כתובת
-            phone: getCol('lookup_mkyw3bhw'),       // טלפון לקוח (mirror)
+            phone: getCol('lookup_mkywf7pb'),       // טלפון לקוח (mirror)
             stage: parentStage,                      // שלב
           };
 
@@ -160,11 +173,11 @@ export default {
               const dateRaw = dateColumn ? dateColumn.text : '';
               const taskDate = dateRaw ? dateRaw.split(' - ')[0] : null;
 
-              // Get supplier name from subitem
+              // Get supplier name from subitem (board_relation uses display_value)
               const supplierColumn = subitem.column_values.find(
                 col => col.id === 'board_relation_mkyw3bx3'
               );
-              const supplier = supplierColumn ? supplierColumn.text : '';
+              const supplier = supplierColumn ? (supplierColumn.display_value || supplierColumn.text || '') : '';
 
               const personMatch = showAll ? true : isYaron;
               if (personMatch && (status === 'ממתין' || status === 'בתהליך' || status === 'טרם החל')) {
@@ -178,6 +191,7 @@ export default {
                   date: taskDate,
                   person: personColumn ? personColumn.text : '',
                   supplier: supplier,
+                  supplierPhone: (supplier && supplierMap[supplier]) ? supplierMap[supplier].phone : '',
                 });
               }
             }

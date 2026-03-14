@@ -882,6 +882,132 @@
     margin-top: 4px;
   }
   .btn-bulk-cancel:hover { color: var(--text); }
+
+  /* ══════════════════════════════════════════
+     MOBILE RESPONSIVE — max-width: 768px
+     ══════════════════════════════════════════ */
+  @media (max-width: 768px) {
+    /* ── Header ── */
+    header {
+      padding: 0 12px;
+      height: 56px;
+    }
+    .header-left { gap: 10px; }
+    .header-logo { width: 32px; height: 32px; }
+    .header-name { font-size: 15px; }
+    .header-sub { font-size: 11px; }
+    .header-right { gap: 6px; }
+    .task-count-badge { padding: 3px 8px; font-size: 11px; }
+    .btn-refresh { padding: 6px 10px; font-size: 12px; }
+    .btn-refresh span:last-child { display: none; } /* hide "רענן" text */
+
+    /* ── Controls ── */
+    .controls {
+      padding: 10px 12px;
+      gap: 8px;
+      flex-direction: column;
+    }
+    .search-wrapper {
+      min-width: 100%;
+      flex: auto;
+    }
+    .search-input { padding: 8px 36px 8px 10px; font-size: 13px; }
+    .filter-select {
+      min-width: 0;
+      flex: 1;
+      font-size: 13px;
+      padding: 8px 10px;
+    }
+    /* Filters in a row */
+    .controls > .filter-select,
+    .controls > .toggle-wrap {
+      flex: 1;
+      min-width: calc(50% - 4px);
+    }
+
+    /* ── Stats ── */
+    .stats-bar { padding: 8px 12px; gap: 6px; }
+    .stat-chip { padding: 4px 8px; font-size: 11px; }
+
+    /* ── List ── */
+    .list-container { padding: 0 8px 80px; }
+
+    /* ── Project Header ── */
+    .project-header { padding: 10px 10px; gap: 8px; }
+    .project-name { font-size: 13px; }
+    .dc-badge { font-size: 10px; padding: 1px 5px; margin-right: 4px; }
+
+    /* ── Project Info Card ── */
+    .project-info-card {
+      margin: 0 4px 6px;
+      padding: 10px 12px;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+    }
+    .info-item { font-size: 11px; gap: 4px; }
+    .info-item .info-icon { font-size: 12px; width: 16px; }
+    .info-item .info-value { white-space: normal; }
+
+    /* ── Task Item — stacked layout ── */
+    .task-item {
+      flex-wrap: wrap;
+      gap: 6px 8px;
+      padding: 10px;
+      align-items: flex-start;
+    }
+
+    /* Row 1: checkbox + action btn + task name */
+    .task-item > .task-checkbox { order: 1; margin-top: 3px; }
+    .task-item > .btn-action { order: 2; padding: 4px 8px; font-size: 11px; }
+    .task-item > .task-name { order: 3; flex: 1; min-width: 0; font-size: 13px; }
+
+    /* Row 2: status + date + advance — full width */
+    .task-item > .status-pill { order: 4; font-size: 10px; padding: 2px 8px; }
+    .task-item > .task-actions { order: 5; flex: 1; min-width: 0; justify-content: flex-start; }
+    .task-item > .btn-advance { order: 6; padding: 5px 10px; font-size: 12px; margin-right: auto; }
+
+    .tasks-list { padding-right: 4px; }
+
+    /* ── Date ── */
+    .date-chip { font-size: 11px; padding: 3px 7px; }
+    .btn-date-main { font-size: 11px; padding: 5px 8px; }
+    .date-dropdown { min-width: 150px; }
+
+    /* ── Toggle labels ── */
+    .toggle-wrap { font-size: 12px; gap: 6px; }
+    .toggle-wrap span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+
+    /* ── Bulk bar ── */
+    .bulk-bar {
+      bottom: 12px;
+      padding: 10px 14px;
+      gap: 8px;
+      border-radius: 12px;
+    }
+    .bulk-count { font-size: 12px; }
+    .bulk-btn { padding: 6px 10px; font-size: 12px; }
+
+    /* ── Bulk modal ── */
+    .bulk-modal { padding: 18px; }
+    .bulk-option-btn { padding: 10px 12px; font-size: 13px; }
+
+    /* ── Intro modal ── */
+    .intro-box { padding: 24px 18px 18px; }
+    .intro-title { font-size: 18px; }
+    .intro-list li { font-size: 12.5px; }
+  }
+
+  /* ══════════════════════════════════════════
+     SMALL MOBILE — max-width: 400px
+     ══════════════════════════════════════════ */
+  @media (max-width: 400px) {
+    header { padding: 0 8px; }
+    .controls { padding: 8px; }
+    .project-info-card { grid-template-columns: 1fr; }
+    .task-item > .task-name { font-size: 12px; }
+    .bulk-bar { flex-direction: column; gap: 6px; }
+    .bulk-bar .bulk-btn { width: 100%; justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -1247,7 +1373,8 @@
     const info = task.parentInfo || {};
     return buttons.map(b => {
       const msg = buildMessage(b.template, info, task.parentName, task.supplier);
-      const phone = formatPhone(b.phone);
+      // Use supplier phone from the task (from suppliers board), fallback to button config phone
+      const phone = formatPhone(task.supplierPhone || b.phone);
       const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
       return `<a class="btn-action" href="${waUrl}" target="_blank" onclick="event.stopPropagation(); actionButtonClicked('${task.id}', '${escHtml(task.name)}')">
         <span class="wa-icon">📱</span>${escHtml(b.buttonLabel)}
@@ -1326,6 +1453,7 @@
     return `
       <div class="task-item${overdueRow}${isSelected}" id="task-${t.id}">
         <input type="checkbox" class="task-checkbox" ${checked} onchange="toggleSelect('${t.id}', this)" onclick="event.stopPropagation()">
+        ${actionButtonsHtml(t)}
         <span class="task-name">${escHtml(t.name)}${showAllTasks && t.person ? ' <span style="color:var(--text-muted);font-size:11px;">(' + escHtml(t.person) + ')</span>' : ''}</span>
         <span class="status-pill ${statusClass}">${t.status}</span>
         <div class="task-actions">
@@ -1353,7 +1481,6 @@
             </div>
           </div>
         </div>
-        ${actionButtonsHtml(t)}
         <button class="${advClass}" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${label}</button>
       </div>`;
   }
