@@ -19,12 +19,13 @@ export default {
       // ?all=true → return ALL users' tasks (not just Yaron), except completed
       if (url.pathname === '/items' && request.method === 'GET') {
         const showAll = url.searchParams.get('all') === 'true';
+        const quickMode = url.searchParams.get('quick') === 'true';
 
         let allItems = [];
         let cursor = null;
         let hasMore = true;
 
-        // Paginate through ALL items (500 per page)
+        // Paginate through items (quick=true → first page only)
         while (hasMore) {
           const itemsFragment = `
             items {
@@ -79,13 +80,18 @@ export default {
           const page = data.data.boards[0].items_page;
           allItems = allItems.concat(page.items);
 
-          if (page.cursor) {
+          if (page.cursor && !quickMode) {
             cursor = page.cursor;
           } else {
             hasMore = false;
           }
         }
 
+        // In quick mode, skip supplier and client phone lookups for speed
+        const supplierMap = {};
+        const clientPhoneMap = {};
+
+        if (!quickMode) {
         // Fetch suppliers with phone numbers (board 5089266595)
         const suppliersQuery = `
           query {
@@ -165,6 +171,7 @@ export default {
             }
           }
         }
+        } // end if (!quickMode)
 
         // Now filter subitems assigned to YARON SHOSHANA
         const filteredTasks = [];
