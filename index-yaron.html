@@ -883,130 +883,245 @@
   }
   .btn-bulk-cancel:hover { color: var(--text); }
 
+  /* ── Calendar Overlay ── */
+  .calendar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,11,18,0.8);
+    backdrop-filter: blur(4px);
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeInOverlay 0.2s ease;
+  }
+  .calendar-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 100%;
+    max-width: 340px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: slideUp 0.25s cubic-bezier(.34,1.56,.64,1);
+    text-align: center;
+  }
+  .calendar-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .calendar-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 18px;
+    padding: 14px;
+    font-family: 'Heebo', sans-serif;
+    outline: none;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .calendar-input:focus { border-color: var(--accent); }
+  .calendar-btns {
+    display: flex;
+    gap: 8px;
+  }
+  .calendar-btns button {
+    flex: 1;
+    padding: 11px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    border: none;
+  }
+  .btn-cal-confirm { background: var(--accent); color: white; }
+  .btn-cal-confirm:hover { opacity: 0.85; }
+  .btn-cal-cancel { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border) !important; }
+  .btn-cal-cancel:hover { color: var(--text); }
+
   /* ══════════════════════════════════════════
-     MOBILE RESPONSIVE — max-width: 768px
+     MOBILE — Minimal task rows + dropdown
      ══════════════════════════════════════════ */
   @media (max-width: 768px) {
     /* ── Header ── */
-    header {
-      padding: 0 12px;
-      height: 56px;
-    }
-    .header-left { gap: 10px; }
-    .header-logo { width: 32px; height: 32px; }
-    .header-name { font-size: 15px; }
-    .header-sub { font-size: 11px; }
+    header { padding: 0 12px; height: 52px; }
+    .header-left { gap: 8px; }
+    .header-logo { width: 30px; height: 30px; border-radius: 6px; }
+    .header-name { font-size: 14px; }
+    .header-sub { font-size: 10px; }
     .header-right { gap: 6px; }
-    .task-count-badge { padding: 3px 8px; font-size: 11px; }
-    .btn-refresh { padding: 6px 10px; font-size: 12px; }
-    .btn-refresh span:last-child { display: none; } /* hide "רענן" text */
+    .task-count-badge { padding: 2px 8px; font-size: 11px; }
+    .btn-refresh { padding: 5px 8px; font-size: 12px; gap: 4px; }
 
     /* ── Controls ── */
     .controls {
-      padding: 10px 12px;
-      gap: 8px;
-      flex-direction: column;
-    }
-    .search-wrapper {
-      min-width: 100%;
-      flex: auto;
-    }
-    .search-input { padding: 8px 36px 8px 10px; font-size: 13px; }
-    .filter-select {
-      min-width: 0;
-      flex: 1;
-      font-size: 13px;
       padding: 8px 10px;
+      gap: 6px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
     }
-    /* Filters in a row */
-    .controls > .filter-select,
-    .controls > .toggle-wrap {
-      flex: 1;
-      min-width: calc(50% - 4px);
-    }
+    .search-wrapper { grid-column: 1 / -1; min-width: 0; }
+    .search-input { padding: 8px 34px 8px 10px; font-size: 13px; }
+    .filter-select { min-width: 0; font-size: 12px; padding: 7px 8px; }
+    .toggle-wrap { font-size: 11px; gap: 5px; }
+    .toggle { width: 30px; height: 17px; }
+    .toggle::after { width: 11px; height: 11px; }
 
     /* ── Stats ── */
-    .stats-bar { padding: 8px 12px; gap: 6px; }
-    .stat-chip { padding: 4px 8px; font-size: 11px; }
+    .stats-bar { padding: 6px 10px; gap: 6px; }
+    .stat-chip { padding: 3px 8px; font-size: 11px; }
 
     /* ── List ── */
-    .list-container { padding: 0 8px 80px; }
+    .list-container { padding: 0 6px 80px; }
+    .project-group { margin-bottom: 6px; }
 
     /* ── Project Header ── */
-    .project-header { padding: 10px 10px; gap: 8px; }
+    .project-header { padding: 9px 10px; gap: 6px; }
     .project-name { font-size: 13px; }
-    .dc-badge { font-size: 10px; padding: 1px 5px; margin-right: 4px; }
+    .dc-badge { font-size: 9px; padding: 0px 5px; margin-right: 4px; }
+    .project-count { font-size: 11px; padding: 1px 7px; }
 
     /* ── Project Info Card ── */
     .project-info-card {
-      margin: 0 4px 6px;
-      padding: 10px 12px;
+      margin: 0 2px 6px;
+      padding: 8px 10px;
       grid-template-columns: 1fr 1fr;
-      gap: 6px 10px;
+      gap: 4px 8px;
     }
     .info-item { font-size: 11px; gap: 4px; }
-    .info-item .info-icon { font-size: 12px; width: 16px; }
-    .info-item .info-value { white-space: normal; }
+    .info-item .info-icon { font-size: 11px; width: 14px; }
+    .info-item .info-value { white-space: normal; font-size: 11px; }
 
-    /* ── Task Item — stacked layout ── */
+    /* ── Task Item — MINIMAL: just name + status + expand btn ── */
     .task-item {
-      flex-wrap: wrap;
-      gap: 6px 8px;
-      padding: 10px;
-      align-items: flex-start;
+      padding: 8px 10px;
+      gap: 8px;
+      flex-wrap: nowrap;
+      align-items: center;
+    }
+    .tasks-list { padding-right: 2px; gap: 2px; }
+
+    /* Hide everything except essentials on mobile */
+    .task-item > .task-actions,
+    .task-item > .btn-advance,
+    .task-item > .btn-action { display: none; }
+
+    .task-item > .task-checkbox { width: 16px; height: 16px; flex-shrink: 0; }
+    .task-item > .task-name { font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-item > .status-pill { font-size: 10px; padding: 2px 7px; }
+
+    /* ── Mobile expand button ── */
+    .btn-mobile-expand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+    .btn-mobile-expand:hover, .btn-mobile-expand.open {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(79,142,247,0.1);
     }
 
-    /* Row 1: checkbox + action btn + task name */
-    .task-item > .task-checkbox { order: 1; margin-top: 3px; }
-    .task-item > .btn-action { order: 2; padding: 4px 8px; font-size: 11px; }
-    .task-item > .task-name { order: 3; flex: 1; min-width: 0; font-size: 13px; }
+    /* ── Mobile actions panel ── */
+    .mobile-actions {
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px;
+      margin: -1px 2px 2px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      animation: slideDown 0.2s ease;
+    }
+    .mobile-actions.open { display: flex; }
 
-    /* Row 2: status + date + advance — full width */
-    .task-item > .status-pill { order: 4; font-size: 10px; padding: 2px 8px; }
-    .task-item > .task-actions { order: 5; flex: 1; min-width: 0; justify-content: flex-start; }
-    .task-item > .btn-advance { order: 6; padding: 5px 10px; font-size: 12px; margin-right: auto; }
+    .mobile-actions-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .mobile-action-btn {
+      flex: 1;
+      min-width: calc(50% - 3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: 'Heebo', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-decoration: none;
+    }
+    .mobile-action-btn:hover { border-color: var(--accent); }
+    .mobile-action-btn .ma-icon { font-size: 15px; }
+    .mobile-action-btn.status-btn { border-color: rgba(79,142,247,0.3); color: var(--accent); }
+    .mobile-action-btn.done-btn { border-color: rgba(109,191,103,0.3); color: #6dbf67; }
+    .mobile-action-btn.date-btn { border-color: rgba(240,165,0,0.3); color: var(--status-wait); }
+    .mobile-action-btn.wa-btn { border-color: rgba(37,211,102,0.3); color: #25d366; }
 
-    .tasks-list { padding-right: 4px; }
-
-    /* ── Date ── */
-    .date-chip { font-size: 11px; padding: 3px 7px; }
-    .btn-date-main { font-size: 11px; padding: 5px 8px; }
-    .date-dropdown { min-width: 150px; }
-
-    /* ── Toggle labels ── */
-    .toggle-wrap { font-size: 12px; gap: 6px; }
-    .toggle-wrap span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    .mobile-date-info {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 2px 0;
+    }
 
     /* ── Bulk bar ── */
     .bulk-bar {
-      bottom: 12px;
-      padding: 10px 14px;
-      gap: 8px;
+      bottom: 10px;
+      padding: 8px 12px;
+      gap: 6px;
       border-radius: 12px;
+      flex-wrap: wrap;
     }
-    .bulk-count { font-size: 12px; }
-    .bulk-btn { padding: 6px 10px; font-size: 12px; }
+    .bulk-count { font-size: 11px; padding-left: 6px; }
+    .bulk-btn { padding: 6px 10px; font-size: 11px; }
 
-    /* ── Bulk modal ── */
-    .bulk-modal { padding: 18px; }
-    .bulk-option-btn { padding: 10px 12px; font-size: 13px; }
-
-    /* ── Intro modal ── */
-    .intro-box { padding: 24px 18px 18px; }
-    .intro-title { font-size: 18px; }
-    .intro-list li { font-size: 12.5px; }
+    /* ── Modals ── */
+    .bulk-modal { padding: 16px; }
+    .bulk-option-btn { padding: 10px; font-size: 13px; }
+    .intro-box { padding: 20px 16px 16px; }
+    .intro-title { font-size: 17px; }
+    .intro-list li { font-size: 12px; }
   }
 
-  /* ══════════════════════════════════════════
-     SMALL MOBILE — max-width: 400px
-     ══════════════════════════════════════════ */
   @media (max-width: 400px) {
-    header { padding: 0 8px; }
-    .controls { padding: 8px; }
+    .controls { grid-template-columns: 1fr; }
     .project-info-card { grid-template-columns: 1fr; }
-    .task-item > .task-name { font-size: 12px; }
-    .bulk-bar { flex-direction: column; gap: 6px; }
-    .bulk-bar .bulk-btn { width: 100%; justify-content: center; }
+    .mobile-action-btn { min-width: 100%; }
+  }
+
+  /* Hide mobile expand on desktop */
+  @media (min-width: 769px) {
+    .btn-mobile-expand { display: none !important; }
+    .mobile-actions { display: none !important; }
   }
 </style>
 </head>
@@ -1113,6 +1228,18 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Calendar Overlay -->
+<div class="calendar-overlay" id="calendarOverlay" style="display:none;" onclick="if(event.target===this)closeCalendar()">
+  <div class="calendar-box">
+    <div class="calendar-title">בחר תאריך</div>
+    <input type="date" class="calendar-input" id="calendarInput">
+    <div class="calendar-btns">
+      <button class="btn-cal-confirm" onclick="confirmCalendar()">✓ אישור</button>
+      <button class="btn-cal-cancel" onclick="closeCalendar()">ביטול</button>
+    </div>
+  </div>
+</div>
 
 <script>
   const WORKER_URL = 'https://monday-yaron.monday-shimrit.workers.dev';
@@ -1461,28 +1588,67 @@
           <div class="date-wrapper">
             <button class="btn-date-main" id="dtoggle-${t.id}" onclick="toggleDateDropdown('${t.id}', event)">✏️ תאריך</button>
             <div class="date-dropdown" id="ddrop-${t.id}">
-              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 1, '${t.date||''}')">
-                <span class="item-icon">📅</span> +1 יום
+              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 0, '')">
+                <span class="item-icon">📌</span> היום
               </button>
               <button class="date-dropdown-item" onclick="quickDate('${t.id}', 7, '${t.date||''}')">
-                <span class="item-icon">📅</span> +7 ימים
-              </button>
-              <button class="date-dropdown-item" onclick="quickDate('${t.id}', 30, '${t.date||''}')">
-                <span class="item-icon">📅</span> +30 ימים
+                <span class="item-icon">📅</span> בעוד שבוע
               </button>
               <hr class="date-dropdown-divider">
-              <button class="date-dropdown-item" onclick="showManualDate('${t.id}')">
-                <span class="item-icon">✍️</span> תאריך ידני
+              <button class="date-dropdown-item" onclick="openCalendar('${t.id}', '${t.date||''}')">
+                <span class="item-icon">🗓️</span> תאריך ידני
               </button>
-              <div class="date-manual-row" id="dmanual-${t.id}">
-                <input type="date" class="date-input" id="di-${t.id}" value="${t.date || todayStr()}">
-                <button class="btn-date-confirm" onclick="setDate('${t.id}')">✓</button>
-              </div>
             </div>
           </div>
         </div>
         <button class="${advClass}" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${label}</button>
-      </div>`;
+        <button class="btn-mobile-expand" onclick="toggleMobileActions('${t.id}', event)">⋯</button>
+      </div>
+      ${mobileActionsHtml(t)}`;
+  }
+
+  function mobileActionsHtml(t) {
+    const dLabel = t.date ? formatDate(t.date) : 'ללא תאריך';
+    const dClass = dateClass(t.date);
+    const nxt = nextStatus[t.status];
+    const nxtLabel = nextLabel[t.status] || '';
+    const buttons = getButtonsForTask(t.name);
+    const info = t.parentInfo || {};
+
+    let waButtons = '';
+    if (buttons.length > 0) {
+      waButtons = buttons.map(b => {
+        const msg = buildMessage(b.template, info, t.parentName, t.supplier);
+        const phone = formatPhone(t.supplierPhone || b.phone);
+        const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+        return `<a class="mobile-action-btn wa-btn" href="${waUrl}" target="_blank" onclick="event.stopPropagation(); actionButtonClicked('${t.id}', '${escHtml(t.name)}')">
+          <span class="ma-icon">📱</span>${escHtml(b.buttonLabel)}
+        </a>`;
+      }).join('');
+    }
+
+    return `<div class="mobile-actions" id="ma-${t.id}">
+      <div class="mobile-date-info">📅 ${dLabel} ${dClass === 'overdue' ? '⚠️ באיחור' : dClass === 'today' ? '📌 היום' : ''}</div>
+      <div class="mobile-actions-row">
+        ${nxt ? `<button class="mobile-action-btn status-btn" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${nxt === 'בוצע' ? '<span class="ma-icon">✅</span>' : '<span class="ma-icon">▶</span>'}${nxtLabel}</button>` : ''}
+        <button class="mobile-action-btn date-btn" onclick="toggleDateDropdown('${t.id}', event)"><span class="ma-icon">📅</span>שינוי תאריך</button>
+      </div>
+      ${waButtons ? `<div class="mobile-actions-row">${waButtons}</div>` : ''}
+    </div>`;
+  }
+
+  function toggleMobileActions(id, event) {
+    event && event.stopPropagation();
+    const panel = document.getElementById('ma-' + id);
+    const btn = event.currentTarget;
+    const isOpen = panel.classList.contains('open');
+    // Close all others
+    document.querySelectorAll('.mobile-actions.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.btn-mobile-expand.open').forEach(el => el.classList.remove('open'));
+    if (!isOpen) {
+      panel.classList.add('open');
+      btn.classList.add('open');
+    }
   }
 
   function toggleDateDropdown(id, event) {
@@ -1505,24 +1671,37 @@
     document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
   });
 
-  function showManualDate(id) {
-    document.getElementById('dmanual-' + id).classList.toggle('open');
+  let calendarTargetId = null;
+
+  function openCalendar(itemId, currentDate) {
+    calendarTargetId = itemId;
+    document.getElementById('calendarInput').value = currentDate || todayStr();
+    document.getElementById('calendarOverlay').style.display = 'flex';
+    // Close dropdowns
+    document.querySelectorAll('.date-dropdown.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
+    // Focus the input so calendar opens on mobile
+    setTimeout(() => document.getElementById('calendarInput').focus(), 100);
+  }
+
+  function closeCalendar() {
+    document.getElementById('calendarOverlay').style.display = 'none';
+    calendarTargetId = null;
+  }
+
+  async function confirmCalendar() {
+    const val = document.getElementById('calendarInput').value;
+    if (!val || !calendarTargetId) return;
+    await updateDate(calendarTargetId, val);
+    closeCalendar();
   }
 
   async function quickDate(itemId, days, currentDate) {
-    const newDate = addDays(currentDate, days);
+    const newDate = days === 0 ? todayStr() : addDays(currentDate, days);
     await updateDate(itemId, newDate);
     // close dropdown
     document.querySelectorAll('.date-dropdown.open').forEach(el => el.classList.remove('open'));
     document.querySelectorAll('.btn-date-main.open').forEach(el => el.classList.remove('open'));
-  }
-
-  async function setDate(itemId) {
-    const val = document.getElementById(`di-${itemId}`).value;
-    if (!val) return;
-    await updateDate(itemId, val);
-    document.getElementById('ddrop-' + itemId).classList.remove('open');
-    document.getElementById('dtoggle-' + itemId).classList.remove('open');
   }
 
   async function updateDate(itemId, date) {

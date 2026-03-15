@@ -33,6 +33,10 @@ export default {
               column_values {
                 id
                 text
+                value
+                ... on BoardRelationValue {
+                  linked_item_ids
+                }
               }
               subitems {
                 id
@@ -121,6 +125,47 @@ export default {
           }
         }
 
+        // Fetch client phone numbers from clients board
+        // Collect all client IDs from board_relation_mkywy46r
+        const clientIds = new Set();
+        for (const item of allItems) {
+          const clientCol = item.column_values.find(c => c.id === 'board_relation_mkywy46r');
+          if (clientCol && clientCol.linked_item_ids && clientCol.linked_item_ids.length > 0) {
+            clientCol.linked_item_ids.forEach(id => clientIds.add(id));
+          }
+        }
+
+        // Fetch phones for all clients in one query
+        const clientPhoneMap = {};
+        if (clientIds.size > 0) {
+          const idsArr = [...clientIds];
+          // Batch in groups of 100
+          for (let i = 0; i < idsArr.length; i += 100) {
+            const batch = idsArr.slice(i, i + 100);
+            const clientQuery = `query { items(ids: [${batch.join(',')}]) { id name column_values(ids: ["phone_mkyw1rbw"]) { text value } } }`;
+            const cRes = await fetch('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': env.MONDAY_API_TOKEN,
+                'API-Version': '2024-10'
+              },
+              body: JSON.stringify({ query: clientQuery }),
+            });
+            const cData = await cRes.json();
+            if (cData.data) {
+              for (const ci of cData.data.items) {
+                const ph = ci.column_values[0];
+                let phone = ph ? ph.text : '';
+                if (!phone && ph && ph.value) {
+                  try { phone = JSON.parse(ph.value).phone || ''; } catch {}
+                }
+                clientPhoneMap[ci.id] = phone;
+              }
+            }
+          }
+        }
+
         // Now filter subitems assigned to YARON SHOSHANA
         const filteredTasks = [];
 
@@ -149,7 +194,13 @@ export default {
             panel: getCol('text_mm1besx6'),          // דגם פאנל
             roofType: getCol('dropdown_mkywtpq4'),  // סוג גג
             address: getCol('lookup_mkywmsse'),     // כתובת
-            phone: getCol('lookup_mkywf7pb'),       // טלפון לקוח (mirror)
+            phone: (() => {
+              const clientCol = item.column_values.find(c => c.id === 'board_relation_mkywy46r');
+              if (clientCol && clientCol.linked_item_ids && clientCol.linked_item_ids.length > 0) {
+                return clientPhoneMap[clientCol.linked_item_ids[0]] || '';
+              }
+              return '';
+            })(),                                    // טלפון לקוח (מבורד לקוחות)
             stage: parentStage,                      // שלב
           };
 
@@ -360,6 +411,157 @@ export default {
         }).filter(b => b.matchText && b.buttonLabel);
 
         return new Response(JSON.stringify(buttons), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // POST /webhook-new-project - Auto-link client when project is created
+      if (url.pathname === '/webhook-new-project' && request.method === 'POST') {
+        const body = await request.json();
+
+        // Monday sends a challenge for webhook verification
+        if (body.challenge) {
+          return new Response(JSON.stringify({ challenge: body.challenge }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const event = body.event;
+        if (!event || !event.pulseId) {
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const projectId = event.pulseId;
+        const projectName = event.pulseName || '';
+
+        // Search for client in clients board (5089265844) by name
+        const searchQuery = `
+          query {
+            boards(ids: 5089265844) {
+              items_page(limit: 500, query_params: {rules: [{column_id: "name", compare_value: "${projectName.replace(/"/g, '\\"')}"}]}) {
+                items {
+                  id
+                  name
+                }
+              }
+            }
+          }
+        `;
+
+        const searchRes = await fetch('https://api.monday.com/v2', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': env.MONDAY_API_TOKEN,
+            'API-Version': '2024-10'
+          },
+          body: JSON.stringify({ query: searchQuery }),
+        });
+
+        const searchData = await searchRes.json();
+
+        if (searchData.errors || !searchData.data) {
+          // Fallback: search all clients and match by name
+          const allClientsQuery = `
+            query {
+              boards(ids: 5089265844) {
+                items_page(limit: 500) {
+                  items { id name }
+                }
+              }
+            }
+          `;
+          const allRes = await fetch('https://api.monday.com/v2', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': env.MONDAY_API_TOKEN,
+              'API-Version': '2024-10'
+            },
+            body: JSON.stringify({ query: allClientsQuery }),
+          });
+          const allData = await allRes.json();
+
+          if (!allData.data) {
+            return new Response(JSON.stringify({ success: false, error: 'Could not fetch clients' }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const clients = allData.data.boards[0].items_page.items;
+          // Find best match - project name contains client name or vice versa
+          const projLower = projectName.toLowerCase().trim();
+          let match = clients.find(c => c.name.toLowerCase().trim() === projLower);
+          if (!match) {
+            match = clients.find(c => projLower.includes(c.name.toLowerCase().trim()) || c.name.toLowerCase().trim().includes(projLower));
+          }
+
+          if (match) {
+            // Link client to project
+            const linkValue = JSON.stringify({ item_ids: [parseInt(match.id)] });
+            const linkMutation = `
+              mutation {
+                change_column_value(
+                  board_id: ${env.MONDAY_BOARD_ID},
+                  item_id: ${projectId},
+                  column_id: "board_relation_mkywy46r",
+                  value: ${JSON.stringify(linkValue)}
+                ) { id }
+              }
+            `;
+            await fetch('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': env.MONDAY_API_TOKEN,
+                'API-Version': '2024-10'
+              },
+              body: JSON.stringify({ query: linkMutation }),
+            });
+
+            return new Response(JSON.stringify({ success: true, linked: match.name, clientId: match.id }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          return new Response(JSON.stringify({ success: true, linked: null, message: 'No matching client found' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        // Use search results
+        const results = searchData.data.boards[0].items_page.items;
+        if (results.length > 0) {
+          const match = results[0];
+          const linkValue = JSON.stringify({ item_ids: [parseInt(match.id)] });
+          const linkMutation = `
+            mutation {
+              change_column_value(
+                board_id: ${env.MONDAY_BOARD_ID},
+                item_id: ${projectId},
+                column_id: "board_relation_mkywy46r",
+                value: ${JSON.stringify(linkValue)}
+              ) { id }
+            }
+          `;
+          await fetch('https://api.monday.com/v2', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': env.MONDAY_API_TOKEN,
+              'API-Version': '2024-10'
+            },
+            body: JSON.stringify({ query: linkMutation }),
+          });
+
+          return new Response(JSON.stringify({ success: true, linked: match.name, clientId: match.id }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify({ success: true, linked: null, message: 'No matching client found' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
