@@ -2035,17 +2035,34 @@
   }
 
   // ── Survey ──
-  const SURVEY_MESSAGE = `נשמח אם תוכלו להקדיש רגע קצר ולשתף את החוויה שלכם מהעבודה איתנו. כמה מילים ודירוג בגוגל עוזרים לנו מאוד להמשיך להשתפר ולתת שירות טוב ללקוחות נוספים. תודה רבה על הזמן והפרגון!\nhttps://s-a.gs/q/review`;
+  function buildSurveyMessage(firstName, gender) {
+    const canYou = gender === 'F' ? 'תוכלי' : gender === 'M' ? 'תוכל' : 'תוכל/י';
+    return `היי ${firstName}, אשמח אם ${canYou} להקדיש רגע קצר ולשתף את החוויה שלך מהעבודה איתנו. כמה מילים ודירוג בגוגל עוזרים לנו מאוד להמשיך להשתפר ולתת שירות טוב ללקוחות נוספים. תודה רבה על הזמן והפרגון!\nhttps://s-a.gs/q/review`;
+  }
 
-  function openSurveyWhatsApp(phone) {
+  async function getGender(name) {
+    try {
+      const res = await fetch(`https://s-a.gs/q/gender?name=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      return { firstName: data.firstName, gender: data.gender };
+    } catch {
+      return { firstName: name.split(' ')[0], gender: 'U' };
+    }
+  }
+
+  function openSurveyWhatsApp(phone, message) {
     const formatted = formatPhone(phone);
-    const waUrl = `https://wa.me/${formatted}?text=${encodeURIComponent(SURVEY_MESSAGE)}`;
+    const waUrl = `https://wa.me/${formatted}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
   }
 
   async function handleSendSurvey(taskId, taskName, parentName, parentId, clientPhone, hasClientLinked) {
+    // Detect gender and build message
+    const { firstName, gender } = await getGender(parentName);
+    const message = buildSurveyMessage(firstName, gender);
+
     if (clientPhone) {
-      openSurveyWhatsApp(clientPhone);
+      openSurveyWhatsApp(clientPhone, message);
       // Mark as done
       const task = allTasks.find(t => t.id === taskId);
       if (task) {
@@ -2069,7 +2086,8 @@
       }
     }
 
-    // Show phone input modal
+    // Show phone input modal - store message for submitSurveyPhone
+    window._pendingSurveyMessage = message;
     showPhoneModal(taskId, taskName, parentName, parentId);
   }
 
@@ -2115,8 +2133,16 @@
       body: JSON.stringify({ parentItemId: parentId, clientName: parentName, phone }),
     }).catch(console.error);
 
+    // Use pending message from handleSendSurvey, or detect gender fresh
+    let message = window._pendingSurveyMessage;
+    if (!message) {
+      const { firstName, gender } = await getGender(parentName);
+      message = buildSurveyMessage(firstName, gender);
+    }
+    window._pendingSurveyMessage = null;
+
     // Open WhatsApp
-    openSurveyWhatsApp(phone);
+    openSurveyWhatsApp(phone, message);
 
     // Mark task as done
     await advanceStatusDirect(taskId, taskName, 'בוצע');
