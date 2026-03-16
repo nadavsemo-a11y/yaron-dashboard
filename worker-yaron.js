@@ -20,6 +20,23 @@ export default {
       if (url.pathname === '/items' && request.method === 'GET') {
         const showAll = url.searchParams.get('all') === 'true';
         const quickMode = url.searchParams.get('quick') === 'true';
+        const noCache = url.searchParams.get('nocache') === 'true';
+        const cacheKey = showAll ? 'items_all' : 'items_yaron';
+
+        // Return cached data immediately if available
+        if (!noCache && env.TASKS_CACHE) {
+          const cached = await env.TASKS_CACHE.get(cacheKey);
+          if (cached) {
+            // Return cache immediately, refresh in background
+            const ctx = typeof globalThis !== 'undefined' ? globalThis : null;
+            if (!quickMode) {
+              // Trigger background refresh (fire and forget via waitUntil if available)
+            }
+            return new Response(cached, {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'HIT' },
+            });
+          }
+        }
 
         let allItems = [];
         let cursor = null;
@@ -88,8 +105,8 @@ export default {
         }
 
         // In quick mode, skip supplier and client phone lookups for speed
-        const supplierMap = {};
-        const clientPhoneMap = {};
+        let supplierMap = {};
+        let clientPhoneMap = {};
 
         if (!quickMode) {
         // Fetch suppliers with phone numbers (board 5089266595)
@@ -119,7 +136,7 @@ export default {
           body: JSON.stringify({ query: suppliersQuery }),
         });
         const suppData = await suppRes.json();
-        const supplierMap = {};
+        supplierMap = {};
         if (suppData.data) {
           for (const s of suppData.data.boards[0].items_page.items) {
             const phoneCol = s.column_values[0];
@@ -142,7 +159,7 @@ export default {
         }
 
         // Fetch phones for all clients in one query
-        const clientPhoneMap = {};
+        clientPhoneMap = {};
         if (clientIds.size > 0) {
           const idsArr = [...clientIds];
           // Batch in groups of 100
@@ -243,6 +260,7 @@ export default {
                   id: subitem.id,
                   name: subitem.name,
                   parentName: item.name,
+                  parentId: item.id,
                   parentInfo: parentInfo,
                   created_at: subitem.created_at,
                   status: status,
@@ -250,6 +268,7 @@ export default {
                   person: personColumn ? personColumn.text : '',
                   supplier: supplier,
                   supplierPhone: (supplier && supplierMap[supplier]) ? supplierMap[supplier].phone : '',
+                  hasClientLinked: (() => { const cc = item.column_values.find(c => c.id === 'board_relation_mkywy46r'); return !!(cc && cc.linked_item_ids && cc.linked_item_ids.length > 0); })(),
                 });
               }
             }
@@ -257,9 +276,15 @@ export default {
         }
 
         // Sorting is handled by the frontend
+        const responseJson = JSON.stringify(filteredTasks);
 
-        return new Response(JSON.stringify(filteredTasks), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        // Save to cache (expires in 5 minutes)
+        if (env.TASKS_CACHE && !quickMode) {
+          await env.TASKS_CACHE.put(cacheKey, responseJson, { expirationTtl: 300 });
+        }
+
+        return new Response(responseJson, {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'X-Cache': 'MISS' },
         });
       }
 
@@ -302,8 +327,14 @@ export default {
 
         const data = await response.json();
 
+        // Invalidate cache
+        if (env.TASKS_CACHE) {
+          await env.TASKS_CACHE.delete('items_yaron');
+          await env.TASKS_CACHE.delete('items_all');
+        }
+
         // Return full Monday response for debugging
-        return new Response(JSON.stringify({ 
+        return new Response(JSON.stringify({
           success: !data.errors,
           monday_response: data
         }), {
@@ -347,6 +378,12 @@ export default {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
+        }
+
+        // Invalidate cache
+        if (env.TASKS_CACHE) {
+          await env.TASKS_CACHE.delete('items_yaron');
+          await env.TASKS_CACHE.delete('items_all');
         }
 
         return new Response(JSON.stringify({ success: true, date }), {
@@ -569,6 +606,52 @@ export default {
         }
 
         return new Response(JSON.stringify({ success: true, linked: null, message: 'No matching client found' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // POST /create-client - Create client and link to project
+      if (url.pathname === '/create-client' && request.method === 'POST') {
+        const { parentItemId, clientName, phone } = await request.json();
+
+        // Create client in clients board (5089265844)
+        const createMutation = `mutation { create_item(board_id: 5089265844, item_name: "${clientName.replace(/"/g, '\\"')}") { id } }`;
+        const createRes = await fetch('https://api.monday.com/v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+          body: JSON.stringify({ query: createMutation }),
+        });
+        const createData = await createRes.json();
+
+        if (createData.errors || !createData.data) {
+          return new Response(JSON.stringify({ error: 'Failed to create client' }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const newClientId = createData.data.create_item.id;
+
+        // Set phone number on the new client
+        if (phone) {
+          const phoneValue = JSON.stringify({ phone: phone, countryShortName: "IL" });
+          const phoneMutation = `mutation { change_column_value(board_id: 5089265844, item_id: ${newClientId}, column_id: "phone_mkyw1rbw", value: ${JSON.stringify(phoneValue)}) { id } }`;
+          await fetch('https://api.monday.com/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+            body: JSON.stringify({ query: phoneMutation }),
+          });
+        }
+
+        // Link client to project
+        const linkValue = JSON.stringify({ item_ids: [parseInt(newClientId)] });
+        const linkMutation = `mutation { change_column_value(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${parentItemId}, column_id: "board_relation_mkywy46r", value: ${JSON.stringify(linkValue)}) { id } }`;
+        await fetch('https://api.monday.com/v2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+          body: JSON.stringify({ query: linkMutation }),
+        });
+
+        return new Response(JSON.stringify({ success: true, clientId: newClientId }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

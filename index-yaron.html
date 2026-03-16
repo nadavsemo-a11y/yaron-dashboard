@@ -207,14 +207,14 @@
   }
 
   .project-group {
-    margin-bottom: 8px;
+    margin-bottom: 5px;
   }
 
   .project-header {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 14px;
+    padding: 8px 12px;
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -251,7 +251,7 @@
   .tasks-list {
     display: none;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     padding-right: 12px;
   }
   .tasks-list.open { display: flex; }
@@ -259,8 +259,8 @@
   .task-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 6px 10px;
     background: var(--surface);
     border: 1px solid transparent;
     border-radius: 8px;
@@ -279,7 +279,7 @@
 
   .task-name {
     flex: 1;
-    font-size: 13.5px;
+    font-size: 12.5px;
     line-height: 1.4;
   }
 
@@ -999,12 +999,12 @@
 
     /* ── Task Item — MINIMAL: just name + status + expand btn ── */
     .task-item {
-      padding: 8px 10px;
-      gap: 8px;
+      padding: 5px 8px;
+      gap: 6px;
       flex-wrap: nowrap;
       align-items: center;
     }
-    .tasks-list { padding-right: 2px; gap: 2px; }
+    .tasks-list { padding-right: 2px; gap: 1px; }
 
     /* Hide everything except essentials on mobile */
     .task-item > .task-actions,
@@ -1012,7 +1012,7 @@
     .task-item > .btn-action { display: none; }
 
     .task-item > .task-checkbox { width: 16px; height: 16px; flex-shrink: 0; }
-    .task-item > .task-name { font-size: 12.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .task-item > .task-name { font-size: 11.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .task-item > .status-pill { font-size: 10px; padding: 2px 7px; }
 
     /* ── Mobile expand button ── */
@@ -1120,6 +1120,100 @@
     .btn-mobile-expand { display: none !important; }
     .mobile-actions { display: none !important; }
   }
+
+  /* ── Survey Button ── */
+  .btn-survey {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(37,211,102,0.5);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(37,211,102,0.2), rgba(18,140,126,0.2));
+    color: #25d366;
+    text-decoration: none;
+  }
+  .btn-survey:hover {
+    background: linear-gradient(135deg, rgba(37,211,102,0.35), rgba(18,140,126,0.35));
+    border-color: rgba(37,211,102,0.7);
+  }
+
+  /* ── Phone Input Modal ── */
+  .phone-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,11,18,0.85);
+    backdrop-filter: blur(6px);
+    z-index: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fadeInOverlay 0.2s ease;
+  }
+  .phone-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    max-width: 380px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: slideUp 0.25s cubic-bezier(.34,1.56,.64,1);
+    text-align: center;
+  }
+  .phone-modal h3 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .phone-modal p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+  .phone-modal input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 18px;
+    padding: 12px;
+    font-family: 'Heebo', sans-serif;
+    outline: none;
+    text-align: center;
+    direction: ltr;
+    margin-bottom: 16px;
+  }
+  .phone-modal input:focus { border-color: var(--accent); }
+  .phone-modal-btns {
+    display: flex;
+    gap: 8px;
+  }
+  .phone-modal-btns button {
+    flex: 1;
+    padding: 11px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+  .btn-phone-send { background: #25d366; color: white; }
+  .btn-phone-send:hover { opacity: 0.85; }
+  .btn-phone-cancel { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border) !important; }
+  .btn-phone-cancel:hover { color: var(--text); }
 </style>
 </head>
 <body>
@@ -1279,43 +1373,34 @@
       </div>`;
 
     try {
-      const allParam = showAllTasks ? 'all=true&' : '';
+      const allParam = showAllTasks ? 'all=true' : '';
 
-      // Phase 1: Quick load (first page only, no phone lookups) + buttons
-      const [quickRes, buttonsRes] = await Promise.all([
-        fetch(`${WORKER_URL}/items?${allParam}quick=true`),
+      // Load tasks (cached = instant, miss = full fetch) + buttons in parallel
+      const [tasksRes, buttonsRes] = await Promise.all([
+        fetch(`${WORKER_URL}/items?${allParam}`),
         allButtons.length === 0 ? fetch(`${WORKER_URL}/buttons`) : Promise.resolve(null),
       ]);
-      if (!quickRes.ok) throw new Error(`HTTP ${quickRes.status}`);
-      allTasks = await quickRes.json();
+      if (!tasksRes.ok) throw new Error(`HTTP ${tasksRes.status}`);
+      allTasks = await tasksRes.json();
       if (buttonsRes && buttonsRes.ok) allButtons = await buttonsRes.json();
 
       populateProjectFilter();
       renderStats();
       renderFiltered();
-      showToast(`נטענו ${allTasks.length} משימות (טוען עוד...)`);
+      const isCached = tasksRes.headers.get('X-Cache') === 'HIT';
+      showToast(`נטענו ${allTasks.length} משימות ✓${isCached ? '' : ''}`);
 
-      // Phase 2: Full load in background (all pages + phone data)
-      const fullRes = await fetch(`${WORKER_URL}/items?${allParam}`);
-      if (fullRes.ok) {
-        const fullTasks = await fullRes.json();
-        if (fullTasks.length > allTasks.length || fullTasks.some(t => t.supplierPhone)) {
-          allTasks = fullTasks;
-          populateProjectFilter();
-          renderStats();
-          renderFiltered();
-        }
-        showToast(`נטענו ${allTasks.length} משימות ✓`);
+      // If served from cache, refresh in background for next time
+      if (isCached) {
+        fetch(`${WORKER_URL}/items?${allParam}&nocache=true`).catch(() => {});
       }
     } catch (e) {
-      if (allTasks.length === 0) {
-        document.getElementById('listContainer').innerHTML = `
-          <div class="state-box">
-            <div class="state-icon">⚠️</div>
-            <div class="state-title">שגיאה בטעינה</div>
-            <div class="state-sub">${e.message}</div>
-          </div>`;
-      }
+      document.getElementById('listContainer').innerHTML = `
+        <div class="state-box">
+          <div class="state-icon">⚠️</div>
+          <div class="state-title">שגיאה בטעינה</div>
+          <div class="state-sub">${e.message}</div>
+        </div>`;
     } finally {
       document.getElementById('refreshIcon').style.animation = '';
     }
@@ -1579,6 +1664,14 @@
     return `<div class="project-info-card">${items}</div>`;
   }
 
+  function surveyButtonHtml(t) {
+    if (!t.name.includes('ביצוע סקר לקוח')) return '';
+    const clientPhone = (t.parentInfo && t.parentInfo.phone) ? t.parentInfo.phone : '';
+    return `<button class="btn-survey" onclick="event.stopPropagation(); handleSendSurvey('${t.id}', '${escHtml(t.name)}', '${escHtml(t.parentName)}', '${t.parentId}', '${escHtml(clientPhone)}', ${!!t.hasClientLinked})">
+      📋 שלח סקר
+    </button>`;
+  }
+
   function taskHtml(t) {
     const statusClass = `status-${t.status}`;
     const label = nextLabel[t.status] || '→';
@@ -1594,6 +1687,7 @@
       <div class="task-item${overdueRow}${isSelected}" id="task-${t.id}">
         <input type="checkbox" class="task-checkbox" ${checked} onchange="toggleSelect('${t.id}', this)" onclick="event.stopPropagation()">
         ${actionButtonsHtml(t)}
+        ${surveyButtonHtml(t)}
         <span class="task-name">${escHtml(t.name)}${showAllTasks && t.person ? ' <span style="color:var(--text-muted);font-size:11px;">(' + escHtml(t.person) + ')</span>' : ''}</span>
         <span class="status-pill ${statusClass}">${t.status}</span>
         <div class="task-actions">
@@ -1640,13 +1734,21 @@
       }).join('');
     }
 
+    let surveyBtn = '';
+    if (t.name.includes('ביצוע סקר לקוח')) {
+      const clientPhone = (t.parentInfo && t.parentInfo.phone) ? t.parentInfo.phone : '';
+      surveyBtn = `<button class="mobile-action-btn wa-btn" onclick="event.stopPropagation(); handleSendSurvey('${t.id}', '${escHtml(t.name)}', '${escHtml(t.parentName)}', '${t.parentId}', '${escHtml(clientPhone)}', ${!!t.hasClientLinked})">
+        <span class="ma-icon">📋</span>שלח סקר
+      </button>`;
+    }
+
     return `<div class="mobile-actions" id="ma-${t.id}">
       <div class="mobile-date-info">📅 ${dLabel} ${dClass === 'overdue' ? '⚠️ באיחור' : dClass === 'today' ? '📌 היום' : ''}</div>
       <div class="mobile-actions-row">
         ${nxt ? `<button class="mobile-action-btn status-btn" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${nxt === 'בוצע' ? '<span class="ma-icon">✅</span>' : '<span class="ma-icon">▶</span>'}${nxtLabel}</button>` : ''}
         <button class="mobile-action-btn date-btn" onclick="toggleDateDropdown('${t.id}', event)"><span class="ma-icon">📅</span>שינוי תאריך</button>
       </div>
-      ${waButtons ? `<div class="mobile-actions-row">${waButtons}</div>` : ''}
+      ${(waButtons || surveyBtn) ? `<div class="mobile-actions-row">${waButtons}${surveyBtn}</div>` : ''}
     </div>`;
   }
 
@@ -1930,6 +2032,111 @@
 
   function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ── Survey ──
+  const SURVEY_MESSAGE = `נשמח אם תוכלו להקדיש רגע קצר ולשתף את החוויה שלכם מהעבודה איתנו. כמה מילים ודירוג בגוגל עוזרים לנו מאוד להמשיך להשתפר ולתת שירות טוב ללקוחות נוספים. תודה רבה על הזמן והפרגון!\nhttps://s-a.gs/q/review`;
+
+  function openSurveyWhatsApp(phone) {
+    const formatted = formatPhone(phone);
+    const waUrl = `https://wa.me/${formatted}?text=${encodeURIComponent(SURVEY_MESSAGE)}`;
+    window.open(waUrl, '_blank');
+  }
+
+  async function handleSendSurvey(taskId, taskName, parentName, parentId, clientPhone, hasClientLinked) {
+    if (clientPhone) {
+      openSurveyWhatsApp(clientPhone);
+      // Mark as done
+      const task = allTasks.find(t => t.id === taskId);
+      if (task) {
+        await advanceStatusDirect(taskId, taskName, 'בוצע');
+      }
+      return;
+    }
+
+    // No phone - check if client is linked
+    if (!hasClientLinked) {
+      // Create client first
+      try {
+        await fetch(`${WORKER_URL}/create-client`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentItemId: parentId, clientName: parentName }),
+        });
+        showToast('לקוח נוצר ב-Monday: ' + parentName);
+      } catch (err) {
+        console.error('Failed to create client:', err);
+      }
+    }
+
+    // Show phone input modal
+    showPhoneModal(taskId, taskName, parentName, parentId);
+  }
+
+  function showPhoneModal(taskId, taskName, parentName, parentId) {
+    const overlay = document.createElement('div');
+    overlay.className = 'phone-overlay';
+    overlay.id = 'phoneOverlay';
+    overlay.innerHTML = `
+      <div class="phone-modal">
+        <h3>📱 הזנת טלפון לקוח</h3>
+        <p>הזן את מספר הטלפון של הלקוח עבור פרויקט "${escHtml(parentName)}"</p>
+        <input type="tel" id="surveyPhoneInput" placeholder="050-1234567" autofocus>
+        <div class="phone-modal-btns">
+          <button class="btn-phone-send" onclick="submitSurveyPhone('${taskId}', '${escHtml(taskName)}', '${escHtml(parentName)}', '${parentId}')">📋 שלח סקר</button>
+          <button class="btn-phone-cancel" onclick="closePhoneModal()">ביטול</button>
+        </div>
+      </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) closePhoneModal(); };
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('surveyPhoneInput').focus(), 100);
+    // Enter key support
+    document.getElementById('surveyPhoneInput').onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        submitSurveyPhone(taskId, taskName, parentName, parentId);
+      }
+    };
+  }
+
+  function closePhoneModal() {
+    const overlay = document.getElementById('phoneOverlay');
+    if (overlay) overlay.remove();
+  }
+
+  async function submitSurveyPhone(taskId, taskName, parentName, parentId) {
+    const phone = document.getElementById('surveyPhoneInput').value.trim();
+    if (!phone) return;
+    closePhoneModal();
+
+    // Save phone to Monday
+    fetch(`${WORKER_URL}/create-client`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parentItemId: parentId, clientName: parentName, phone }),
+    }).catch(console.error);
+
+    // Open WhatsApp
+    openSurveyWhatsApp(phone);
+
+    // Mark task as done
+    await advanceStatusDirect(taskId, taskName, 'בוצע');
+  }
+
+  async function advanceStatusDirect(itemId, name, newStatus) {
+    try {
+      const res = await fetch(`${WORKER_URL}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, newStatus }),
+      });
+      if (!res.ok) throw new Error();
+      allTasks = allTasks.filter(t => t.id !== itemId);
+      renderStats();
+      renderFiltered();
+      showToast(`✓ "${name}" הושלמה`);
+    } catch {
+      showToast('שגיאה בעדכון הסטטוס');
+    }
   }
 
   // ── Intro ──
