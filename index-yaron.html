@@ -1145,6 +1145,34 @@
     border-color: rgba(37,211,102,0.7);
   }
 
+  /* ── Spec Button ── */
+  .btn-spec {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(79,142,247,0.35);
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'Heebo', sans-serif;
+    cursor: pointer;
+    transition: all 0.18s;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,92,191,0.15));
+    color: #4f8ef7;
+    text-decoration: none;
+  }
+  .btn-spec:hover {
+    background: linear-gradient(135deg, rgba(79,142,247,0.35), rgba(124,92,191,0.35));
+    border-color: rgba(79,142,247,0.7);
+  }
+  .btn-spec:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   /* ── Phone Input Modal ── */
   .phone-overlay {
     position: fixed;
@@ -1675,6 +1703,14 @@
     </button>`;
   }
 
+  function specButtonHtml(t) {
+    if (!t.name.includes('תכנון')) return '';
+    const info = JSON.stringify(t.parentInfo || {}).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+    return `<button class="btn-spec" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}', this)" data-info='${info}'>
+      📋 שלח פריסה לאישור
+    </button>`;
+  }
+
   function taskHtml(t) {
     const statusClass = `status-${t.status}`;
     const label = nextLabel[t.status] || '→';
@@ -1691,6 +1727,7 @@
         <input type="checkbox" class="task-checkbox" ${checked} onchange="toggleSelect('${t.id}', this)" onclick="event.stopPropagation()">
         ${actionButtonsHtml(t)}
         ${surveyButtonHtml(t)}
+        ${specButtonHtml(t)}
         <span class="task-name">${escHtml(t.name)}${showAllTasks && t.person ? ' <span style="color:var(--text-muted);font-size:11px;">(' + escHtml(t.person) + ')</span>' : ''}</span>
         <span class="status-pill ${statusClass}">${t.status}</span>
         <div class="task-actions">
@@ -1745,13 +1782,21 @@
       </button>`;
     }
 
+    let specBtn = '';
+    if (t.name.includes('תכנון')) {
+      const mInfo = JSON.stringify(t.parentInfo || {}).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+      specBtn = `<button class="mobile-action-btn wa-btn" style="border-color:rgba(79,142,247,0.35);color:#4f8ef7;background:rgba(79,142,247,0.1);" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}', this)" data-info='${mInfo}'>
+        <span class="ma-icon">📋</span>שלח פריסה לאישור
+      </button>`;
+    }
+
     return `<div class="mobile-actions" id="ma-${t.id}">
       <div class="mobile-date-info">📅 ${dLabel} ${dClass === 'overdue' ? '⚠️ באיחור' : dClass === 'today' ? '📌 היום' : ''}</div>
       <div class="mobile-actions-row">
         ${nxt ? `<button class="mobile-action-btn status-btn" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${nxt === 'בוצע' ? '<span class="ma-icon">✅</span>' : '<span class="ma-icon">▶</span>'}${nxtLabel}</button>` : ''}
         <button class="mobile-action-btn date-btn" onclick="toggleDateDropdown('${t.id}', event)"><span class="ma-icon">📅</span>שינוי תאריך</button>
       </div>
-      ${(waButtons || surveyBtn) ? `<div class="mobile-actions-row">${waButtons}${surveyBtn}</div>` : ''}
+      ${(waButtons || surveyBtn || specBtn) ? `<div class="mobile-actions-row">${waButtons}${surveyBtn}${specBtn}</div>` : ''}
     </div>`;
   }
 
@@ -2196,6 +2241,96 @@
 
     // Mark task as done
     await advanceStatusDirect(taskId, taskName, 'בוצע');
+  }
+
+  // ── Spec (Send Design for Approval) ──
+  async function sendSpec(taskId, parentName, btn) {
+    const info = JSON.parse(btn.getAttribute('data-info') || '{}');
+    btn.disabled = true;
+    btn.textContent = '⏳ יוצר מפרט...';
+
+    try {
+      const res = await fetch(`${WORKER_URL}/spec/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName: parentName, parentInfo: info }),
+      });
+      const data = await res.json();
+
+      if (!data.success || !data.url) {
+        throw new Error(data.error || 'Failed to create spec');
+      }
+
+      const specUrl = data.url;
+      btn.textContent = '✓ נוצר!';
+      btn.style.borderColor = 'rgba(46,204,113,0.5)';
+      btn.style.color = '#2ecc71';
+
+      // Build WhatsApp message
+      const clientPhone = info.phone || '';
+      const firstName = parentName.split(' ')[0];
+      const message = `שלום ${firstName}, מצורף המפרט הטכני של המערכת הסולארית שלך לאישור:\n${specUrl}\n\nבברכה,\nצוות SEMO AGS ☀️`;
+
+      if (clientPhone) {
+        const formatted = formatPhone(clientPhone);
+        const waUrl = `https://wa.me/${formatted}?text=${encodeURIComponent(message)}`;
+        window.open(waUrl, '_blank');
+      } else {
+        // No phone — copy link and show toast
+        try { await navigator.clipboard.writeText(specUrl); } catch {}
+        showToast('לינק מפרט הועתק: ' + specUrl);
+        // Show phone modal for manual entry
+        window._pendingSpecMessage = message;
+        window._pendingSpecUrl = specUrl;
+        showSpecPhoneModal(taskId, parentName);
+      }
+
+      showToast('מפרט נוצר: ' + specUrl);
+
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '📋 שלח פריסה לאישור';
+      showToast('שגיאה: ' + e.message);
+    }
+  }
+
+  function showSpecPhoneModal(taskId, parentName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'phone-overlay';
+    overlay.id = 'specPhoneOverlay';
+    overlay.innerHTML = `
+      <div class="phone-modal">
+        <h3>📱 שליחת מפרט בוואטסאפ</h3>
+        <p>הזן טלפון לקוח עבור "${escHtml(parentName)}"</p>
+        <input type="tel" id="specPhoneInput" placeholder="050-1234567" autofocus>
+        <div class="phone-modal-btns">
+          <button class="btn-phone-send" onclick="submitSpecPhone()">📤 שלח בוואטסאפ</button>
+          <button class="btn-phone-cancel" onclick="closeSpecPhoneModal()">ביטול</button>
+        </div>
+      </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) closeSpecPhoneModal(); };
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('specPhoneInput').focus(), 100);
+    document.getElementById('specPhoneInput').onkeydown = (e) => {
+      if (e.key === 'Enter') submitSpecPhone();
+    };
+  }
+
+  function closeSpecPhoneModal() {
+    const overlay = document.getElementById('specPhoneOverlay');
+    if (overlay) overlay.remove();
+  }
+
+  function submitSpecPhone() {
+    const phone = document.getElementById('specPhoneInput').value.trim();
+    if (!phone) return;
+    closeSpecPhoneModal();
+    const formatted = formatPhone(phone);
+    const message = window._pendingSpecMessage || `מפרט טכני: ${window._pendingSpecUrl || ''}`;
+    const waUrl = `https://wa.me/${formatted}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+    window._pendingSpecMessage = null;
+    window._pendingSpecUrl = null;
   }
 
   async function advanceStatusDirect(itemId, name, newStatus) {
