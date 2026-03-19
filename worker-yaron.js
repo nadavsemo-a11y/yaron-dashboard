@@ -705,6 +705,7 @@ export default {
 
           const specData = {
             type: 'spec',
+            subitemId: subitemId || '',
             projectName,
             address: info.address || '',
             kwp: info.dc || '',
