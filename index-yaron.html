@@ -2263,9 +2263,15 @@
   }
 
   // ── Design Link (Send INTERSOL link to client) ──
+  function extractUrl(text) {
+    if (!text) return '';
+    const match = text.match(/https?:\/\/[^\s]+/);
+    return match ? match[0] : text;
+  }
+
   function sendDesignLink(taskId, parentName) {
     const info = (window._specInfoMap || {})[taskId] || {};
-    const link = info.intersolLink || '';
+    const link = extractUrl(info.intersolLink || '');
     if (!link) { showToast('אין לינק הדמייה לפרויקט זה'); return; }
     const clientPhone = info.phone || '';
     const firstName = parentName.split(' ')[0];
@@ -2275,9 +2281,49 @@
       const formatted = formatPhone(clientPhone);
       window.open(`https://wa.me/${formatted}?text=${encodeURIComponent(message)}`, '_blank');
     } else {
-      try { navigator.clipboard.writeText(link); } catch {}
-      showToast('לינק הדמייה הועתק: ' + link);
+      // No phone — show phone input modal
+      window._pendingDesignMessage = message;
+      window._pendingDesignLink = link;
+      showDesignPhoneModal(parentName);
     }
+  }
+
+  function showDesignPhoneModal(parentName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'phone-overlay';
+    overlay.id = 'designPhoneOverlay';
+    overlay.innerHTML = `
+      <div class="phone-modal">
+        <h3>📱 שליחת הדמייה בוואטסאפ</h3>
+        <p>הזן טלפון לקוח עבור "${escHtml(parentName)}"</p>
+        <input type="tel" id="designPhoneInput" placeholder="050-1234567" autofocus>
+        <div class="phone-modal-btns">
+          <button class="btn-phone-send" onclick="submitDesignPhone()">📤 שלח בוואטסאפ</button>
+          <button class="btn-phone-cancel" onclick="closeDesignPhoneModal()">ביטול</button>
+        </div>
+      </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) closeDesignPhoneModal(); };
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('designPhoneInput').focus(), 100);
+    document.getElementById('designPhoneInput').onkeydown = (e) => {
+      if (e.key === 'Enter') submitDesignPhone();
+    };
+  }
+
+  function closeDesignPhoneModal() {
+    const overlay = document.getElementById('designPhoneOverlay');
+    if (overlay) overlay.remove();
+  }
+
+  function submitDesignPhone() {
+    const phone = document.getElementById('designPhoneInput').value.trim();
+    if (!phone) return;
+    closeDesignPhoneModal();
+    const formatted = formatPhone(phone);
+    const message = window._pendingDesignMessage || window._pendingDesignLink || '';
+    window.open(`https://wa.me/${formatted}?text=${encodeURIComponent(message)}`, '_blank');
+    window._pendingDesignMessage = null;
+    window._pendingDesignLink = null;
   }
 
   // ── Spec (Send Design for Approval) ──
