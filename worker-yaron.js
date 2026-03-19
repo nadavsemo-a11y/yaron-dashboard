@@ -218,6 +218,7 @@ export default {
             panel: getCol('text_mm1besx6'),          // דגם פאנל
             roofType: getCol('dropdown_mkywtpq4'),  // סוג גג
             address: getCol('lookup_mkywmsse'),     // כתובת
+            intersolLink: getCol('link_mm1k3v67'),  // לינק INTERSOL
             phone: (() => {
               const clientCol = item.column_values.find(c => c.id === 'board_relation_mkywy46r');
               if (clientCol && clientCol.linked_item_ids && clientCol.linked_item_ids.length > 0) {
@@ -657,117 +658,66 @@ export default {
       }
 
       // POST /spec/create - Create spec document and return short URL
+      // Uses Monday data (parentInfo) — no INTERSOL connection needed
       if (url.pathname === '/spec/create' && request.method === 'POST') {
-        const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
-        const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
-        const INTERSOL_USER = 'SEMO AGS';
-        const INTERSOL_PASS = 'ebFgSoP3Na!(XLX*1Alj4rWB';
-        const INTERSOL_BASE = 'https://app.intersol-sv.com';
         const SEMO_WORKER_URL = 'https://s-a.gs';
 
         try {
           const body = await request.json();
-          const { projectName, parentInfo } = body;
+          const { projectName, parentInfo, subitemId } = body;
           if (!projectName) {
             return new Response(JSON.stringify({ error: 'Missing projectName' }), {
               status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
           }
 
-          // Step 1: Login to INTERSOL
-          const tokenRes = await fetch(INTERSOL_TOKEN_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }),
-          });
-          if (!tokenRes.ok) throw new Error('INTERSOL login failed');
-          const token = (await tokenRes.json()).token;
+          const info = parentInfo || {};
 
-          // Step 2: Fetch INTERSOL projects
-          const projRes = await fetch(INTERSOL_PROJECTS_URL, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-          });
-          if (!projRes.ok) throw new Error('INTERSOL fetch failed');
-          const intersolProjects = (await projRes.json()).list || [];
-
-          // Step 3: Match project by name
-          const normalize = (s) => s.replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
-          const mNorm = normalize(projectName);
-
-          function getIntersolName(proj) {
-            const assets = (proj.projectInfo || {}).assets || [];
-            for (const a of assets) {
-              if (typeof a.value === 'object' && a.value && a.value.project_name) return a.value.project_name;
-            }
-            return proj.title || '';
-          }
-
-          function extractFields(proj) {
-            const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, num_modules: null };
-            const assets = (proj.projectInfo || {}).assets || [];
-            for (const a of assets) {
-              const value = a.value || '';
-              if (typeof value === 'object') {
-                if (value.permit_limit) result.permit_limit = value.permit_limit;
-                if (value.connection_size) result.connection_size = value.connection_size;
-                if (value.solar_module) result.solar_module = value.solar_module;
-                if (value.solar_inverter) result.solar_inverter = value.solar_inverter;
-                if (value.num_modules) result.num_modules = value.num_modules;
+          // Fetch design image from Monday subitem update (uploaded by INTERSOL sync)
+          let designImageUrl = '';
+          if (subitemId) {
+            try {
+              const imgQuery = `query { items(ids: [${subitemId}]) { updates(limit: 20) { body assets { public_url } } } }`;
+              const imgRes = await fetch('https://api.monday.com/v2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                body: JSON.stringify({ query: imgQuery }),
+              });
+              const imgData = await imgRes.json();
+              const updates = imgData.data?.items?.[0]?.updates || [];
+              for (const u of updates) {
+                if (u.body && u.body.includes('INTERSOL') && u.assets && u.assets.length > 0) {
+                  designImageUrl = u.assets[0].public_url || '';
+                  break;
+                }
               }
-            }
-            return result;
+            } catch { /* best effort */ }
           }
 
-          function getDesignImage(proj) {
-            const di = proj.designInfo;
-            if (!di || !di.assets || !di.assets.length) return null;
-            return di.assets[di.assets.length - 1].value || null;
-          }
-
-          let bestMatch = null;
-          let bestScore = 0;
-          for (const iProj of intersolProjects) {
-            const iName = getIntersolName(iProj);
-            const iNorm = normalize(iName);
-            if (mNorm === iNorm) { bestMatch = iProj; bestScore = 100; break; }
-            if (mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
-              const score = Math.min(mNorm.length, iNorm.length) / Math.max(mNorm.length, iNorm.length) * 90;
-              if (score > bestScore) { bestMatch = iProj; bestScore = score; }
-            }
-          }
-
-          // Step 4: Build spec data (combine INTERSOL + Monday parentInfo)
-          const iFields = bestMatch ? extractFields(bestMatch) : {};
-          const designImageUrl = bestMatch ? getDesignImage(bestMatch) : null;
-          const intersolUrl = bestMatch ? `${INTERSOL_BASE}/projects/${bestMatch.id}/${bestMatch.slug || ''}` : null;
-
-          // Calculate numModules from kwp and panel wattage if not available
-          let numModules = iFields.num_modules;
-          if (!numModules && parentInfo) {
-            // Try to extract wattage from panel name (e.g. "AIKO 640W")
-            const panelStr = parentInfo.panel || iFields.solar_module || '';
-            const wattMatch = panelStr.match(/(\d{3,4})\s*[wW]/);
-            const kwp = iFields.kwp || parseFloat(parentInfo.dc) || 0;
-            if (wattMatch && kwp) {
-              numModules = Math.round(kwp * 1000 / parseInt(wattMatch[1]));
-            }
+          // Calculate numModules from kwp and panel wattage
+          let numModules = '';
+          const panelStr = info.panel || '';
+          const wattMatch = panelStr.match(/(\d{3,4})\s*[wW]/);
+          const kwp = parseFloat(info.dc) || 0;
+          if (wattMatch && kwp) {
+            numModules = Math.round(kwp * 1000 / parseInt(wattMatch[1]));
           }
 
           const specData = {
             type: 'spec',
-            projectName: projectName,
-            address: (parentInfo && parentInfo.address) || '',
-            kwp: iFields.kwp || (parentInfo && parentInfo.dc) || '',
-            acPower: iFields.permit_limit || (parentInfo && parentInfo.ac) || '',
-            connectionSize: iFields.connection_size || (parentInfo && parentInfo.connectionSize) || '',
-            numModules: numModules || '',
-            solarModule: iFields.solar_module || (parentInfo && parentInfo.panel) || '',
-            solarInverter: iFields.solar_inverter || (parentInfo && parentInfo.inverter) || '',
-            designImageUrl: designImageUrl || '',
-            intersolUrl: intersolUrl || '',
+            projectName,
+            address: info.address || '',
+            kwp: info.dc || '',
+            acPower: info.ac || '',
+            connectionSize: info.connectionSize || '',
+            numModules,
+            solarModule: info.panel || '',
+            solarInverter: info.inverter || '',
+            designImageUrl,
+            intersolUrl: info.intersolLink || '',
           };
 
-          // Step 5: Save to KV via s-a.gs worker
+          // Save to KV via s-a.gs worker
           const saveRes = await fetch(`${SEMO_WORKER_URL}/q/save`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -782,7 +732,6 @@ export default {
             id: saveResult.id,
             url: saveResult.url,
             specData,
-            intersolMatch: bestMatch ? { name: getIntersolName(bestMatch), score: bestScore } : null,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });

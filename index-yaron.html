@@ -2253,7 +2253,7 @@
       const res = await fetch(`${WORKER_URL}/spec/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: parentName, parentInfo: info }),
+        body: JSON.stringify({ projectName: parentName, parentInfo: info, subitemId: taskId }),
       });
       const data = await res.json();
 
