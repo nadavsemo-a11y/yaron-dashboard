@@ -923,6 +923,7 @@ export default {
           const chunk = matches.slice(offset, offset + CHUNK_SIZE);
           let linksUpdated = 0;
           let imagesUploaded = 0;
+          let imagesSkipped = 0;
           const errors = [];
           // Debug: show first 5 INTERSOL names for verification
           const iSample = intersolProjects.slice(0, 5).map(p => ({ title: p.title, extractedName: getIntersolName(p), hasDI: !!(p.designInfo && p.designInfo.assets) }));
@@ -958,6 +959,22 @@ export default {
             // 5b: Upload design image to subitem "תכנון + הצגה ללקוח"
             if (m.designImage && m.subitemId) {
               try {
+                // Check if image was already uploaded (look for existing update with "INTERSOL")
+                const checkQuery = `query { items(ids: [${m.subitemId}]) { updates(limit: 20) { id body assets { id } } } }`;
+                const checkRes = await fetch('https://api.monday.com/v2', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                  body: JSON.stringify({ query: checkQuery }),
+                });
+                const checkData = await checkRes.json();
+                const existingUpdates = checkData.data?.items?.[0]?.updates || [];
+                const alreadyHasImage = existingUpdates.some(u => u.body && u.body.includes('INTERSOL') && u.assets && u.assets.length > 0);
+
+                if (alreadyHasImage) {
+                  imagesSkipped++;
+                  continue;
+                }
+
                 // Download image from INTERSOL
                 const imgRes = await fetch(m.designImage, {
                   headers: { 'Authorization': `Bearer ${token}` },
@@ -1008,6 +1025,7 @@ export default {
             processed_count: chunk.length,
             links_updated: linksUpdated,
             images_uploaded: imagesUploaded,
+            images_skipped: imagesSkipped,
             has_more: hasMore2,
             next_offset: hasMore2 ? offset + CHUNK_SIZE : null,
             skipped_no_subitem: noSubitem.length > 0 ? noSubitem : undefined,
