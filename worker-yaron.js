@@ -675,9 +675,10 @@ export default {
 
           // Fetch design image from Monday subitem update (uploaded by INTERSOL sync)
           let designImageUrl = '';
+          let imageDebug = {};
           if (subitemId) {
             try {
-              const imgQuery = `query { items(ids: [${subitemId}]) { updates(limit: 20) { body assets { public_url } } } }`;
+              const imgQuery = `query { items(ids: [${subitemId}]) { updates(limit: 20) { body assets { id url public_url } } } }`;
               const imgRes = await fetch('https://api.monday.com/v2', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
@@ -685,13 +686,51 @@ export default {
               });
               const imgData = await imgRes.json();
               const updates = imgData.data?.items?.[0]?.updates || [];
+              imageDebug.totalUpdates = updates.length;
+              imageDebug.intersolUpdates = updates.filter(u => u.body && u.body.includes('INTERSOL')).length;
               for (const u of updates) {
                 if (u.body && u.body.includes('INTERSOL') && u.assets && u.assets.length > 0) {
-                  designImageUrl = u.assets[0].public_url || '';
+                  const asset = u.assets[0];
+                  designImageUrl = asset.public_url || asset.url || '';
+                  imageDebug.foundAsset = { id: asset.id, url: asset.url, public_url: asset.public_url };
                   break;
                 }
               }
-            } catch { /* best effort */ }
+            } catch (e) { imageDebug.error = e.message; }
+          }
+
+          // Fallback: fetch from INTERSOL if Monday didn't have the image
+          if (!designImageUrl && projectName) {
+            try {
+              const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
+              const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
+              const tokenRes = await fetch(INTERSOL_TOKEN_URL, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: 'SEMO AGS', password: 'ebFgSoP3Na!(XLX*1Alj4rWB' }),
+              });
+              if (tokenRes.ok) {
+                const token = (await tokenRes.json()).token;
+                const projRes = await fetch(INTERSOL_PROJECTS_URL, {
+                  headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                });
+                if (projRes.ok) {
+                  const projects = (await projRes.json()).list || [];
+                  const normalize = (s) => s.replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
+                  const mNorm = normalize(projectName);
+                  for (const p of projects) {
+                    const pName = ((p.projectInfo || {}).assets || []).reduce((n, a) => (typeof a.value === 'object' && a.value && a.value.project_name) ? a.value.project_name : n, p.title || '');
+                    if (normalize(pName) === mNorm || mNorm.includes(normalize(pName)) || normalize(pName).includes(mNorm)) {
+                      const di = p.designInfo;
+                      if (di && di.assets && di.assets.length) {
+                        designImageUrl = di.assets[di.assets.length - 1].value || '';
+                        imageDebug.source = 'intersol';
+                      }
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (e) { imageDebug.intersolError = e.message; }
           }
 
           // Calculate numModules from kwp and panel wattage
@@ -733,6 +772,7 @@ export default {
             id: saveResult.id,
             url: saveResult.url,
             specData,
+            imageDebug,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
