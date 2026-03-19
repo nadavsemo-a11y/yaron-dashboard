@@ -1705,10 +1705,22 @@
 
   function specButtonHtml(t) {
     if (!t.name.includes('תכנון')) return '';
-    const info = JSON.stringify(t.parentInfo || {}).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-    return `<button class="btn-spec" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}', this)" data-info='${info}'>
+    const info = t.parentInfo || {};
+    // Store info in a global map to avoid HTML attribute escaping issues
+    window._specInfoMap = window._specInfoMap || {};
+    window._specInfoMap[t.id] = info;
+    let html = '';
+    // Button 1: Send INTERSOL design link to client
+    if (info.intersolLink) {
+      html += `<button class="btn-action" onclick="event.stopPropagation(); sendDesignLink('${t.id}', '${escHtml(t.parentName)}')">
+        <span class="wa-icon">🏠</span>שלח הדמייה
+      </button>`;
+    }
+    // Button 2: Send spec for signature
+    html += `<button class="btn-spec" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}')">
       📋 שלח פריסה לאישור
     </button>`;
+    return html;
   }
 
   function taskHtml(t) {
@@ -1782,10 +1794,17 @@
       </button>`;
     }
 
-    let specBtn = '';
+    let specBtns = '';
     if (t.name.includes('תכנון')) {
-      const mInfo = JSON.stringify(t.parentInfo || {}).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
-      specBtn = `<button class="mobile-action-btn wa-btn" style="border-color:rgba(79,142,247,0.35);color:#4f8ef7;background:rgba(79,142,247,0.1);" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}', this)" data-info='${mInfo}'>
+      const info = t.parentInfo || {};
+      window._specInfoMap = window._specInfoMap || {};
+      window._specInfoMap[t.id] = info;
+      if (info.intersolLink) {
+        specBtns += `<button class="mobile-action-btn wa-btn" onclick="event.stopPropagation(); sendDesignLink('${t.id}', '${escHtml(t.parentName)}')">
+          <span class="ma-icon">🏠</span>שלח הדמייה
+        </button>`;
+      }
+      specBtns += `<button class="mobile-action-btn wa-btn" style="border-color:rgba(79,142,247,0.35);color:#4f8ef7;background:rgba(79,142,247,0.1);" onclick="event.stopPropagation(); sendSpec('${t.id}', '${escHtml(t.parentName)}')">
         <span class="ma-icon">📋</span>שלח פריסה לאישור
       </button>`;
     }
@@ -1796,7 +1815,7 @@
         ${nxt ? `<button class="mobile-action-btn status-btn" onclick="advanceStatus(this, '${t.id}', '${escHtml(t.name)}', '${t.status}')">${nxt === 'בוצע' ? '<span class="ma-icon">✅</span>' : '<span class="ma-icon">▶</span>'}${nxtLabel}</button>` : ''}
         <button class="mobile-action-btn date-btn" onclick="toggleDateDropdown('${t.id}', event)"><span class="ma-icon">📅</span>שינוי תאריך</button>
       </div>
-      ${(waButtons || surveyBtn || specBtn) ? `<div class="mobile-actions-row">${waButtons}${surveyBtn}${specBtn}</div>` : ''}
+      ${(waButtons || surveyBtn || specBtns) ? `<div class="mobile-actions-row">${waButtons}${surveyBtn}${specBtns}</div>` : ''}
     </div>`;
   }
 
@@ -2243,11 +2262,30 @@
     await advanceStatusDirect(taskId, taskName, 'בוצע');
   }
 
+  // ── Design Link (Send INTERSOL link to client) ──
+  function sendDesignLink(taskId, parentName) {
+    const info = (window._specInfoMap || {})[taskId] || {};
+    const link = info.intersolLink || '';
+    if (!link) { showToast('אין לינק הדמייה לפרויקט זה'); return; }
+    const clientPhone = info.phone || '';
+    const firstName = parentName.split(' ')[0];
+    const message = `שלום ${firstName}, מצורף לינק להדמיית המערכת הסולארית שלך:\n${link}\n\nבברכה,\nצוות SEMO AGS ☀️`;
+
+    if (clientPhone) {
+      const formatted = formatPhone(clientPhone);
+      window.open(`https://wa.me/${formatted}?text=${encodeURIComponent(message)}`, '_blank');
+    } else {
+      try { navigator.clipboard.writeText(link); } catch {}
+      showToast('לינק הדמייה הועתק: ' + link);
+    }
+  }
+
   // ── Spec (Send Design for Approval) ──
   async function sendSpec(taskId, parentName, btn) {
-    const info = JSON.parse(btn.getAttribute('data-info') || '{}');
-    btn.disabled = true;
-    btn.textContent = '⏳ יוצר מפרט...';
+    const info = (window._specInfoMap || {})[taskId] || {};
+    // Find the button element if not passed
+    if (!btn) btn = document.querySelector(`[onclick*="sendSpec('${taskId}'"]`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ יוצר מפרט...'; }
 
     try {
       const res = await fetch(`${WORKER_URL}/spec/create`, {
@@ -2262,9 +2300,11 @@
       }
 
       const specUrl = data.url;
-      btn.textContent = '✓ נוצר!';
-      btn.style.borderColor = 'rgba(46,204,113,0.5)';
-      btn.style.color = '#2ecc71';
+      if (btn) {
+        btn.textContent = '✓ נוצר!';
+        btn.style.borderColor = 'rgba(46,204,113,0.5)';
+        btn.style.color = '#2ecc71';
+      }
 
       // Build WhatsApp message
       const clientPhone = info.phone || '';
@@ -2288,8 +2328,7 @@
       showToast('מפרט נוצר: ' + specUrl);
 
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '📋 שלח פריסה לאישור';
+      if (btn) { btn.disabled = false; btn.textContent = '📋 שלח פריסה לאישור'; }
       showToast('שגיאה: ' + e.message);
     }
   }
