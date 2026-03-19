@@ -656,6 +656,359 @@ export default {
         });
       }
 
+      // POST /intersol-sync - Scan INTERSOL and update Monday.com
+      if (url.pathname === '/intersol-sync' && request.method === 'POST') {
+        const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
+        const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
+        const INTERSOL_USER = 'SEMO AGS';
+        const INTERSOL_PASS = 'ebFgSoP3Na!(XLX*1Alj4rWB';
+
+        const COLUMN_MAP = {
+          solar_module: 'text_mm1besx6',
+          solar_inverter: 'text_mm1b2dx7',
+          max_dc: 'numeric_mm1bdmv6',
+          connection_size: 'text_mm1b1hq5',
+          kwp: 'numeric_mkyw4dcb',
+          ac_power: 'numeric_mkyxfrg9',
+        };
+
+        const KNOWN_BAD = new Set(['שוקי -סנדרין|שוקי חזן', 'יקיר יהב|חיים יהב']);
+
+        try {
+          // Step 1: Login to INTERSOL
+          const tokenRes = await fetch(INTERSOL_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }),
+          });
+          if (!tokenRes.ok) throw new Error('INTERSOL login failed');
+          const tokenData = await tokenRes.json();
+          const token = tokenData.token;
+
+          // Step 2: Fetch all projects
+          const projRes = await fetch(INTERSOL_PROJECTS_URL, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+          });
+          if (!projRes.ok) throw new Error('INTERSOL fetch failed');
+          const projData = await projRes.json();
+          const intersolProjects = projData.list || projData;
+
+          // Step 3: Fetch Monday projects
+          let mondayItems = [];
+          let cursor = null;
+          let hasMore = true;
+          while (hasMore) {
+            const q = cursor
+              ? `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500, cursor: "${cursor}") { cursor items { id name } } } }`
+              : `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500) { cursor items { id name } } } }`;
+            const mRes = await fetch('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+              body: JSON.stringify({ query: q }),
+            });
+            const mData = await mRes.json();
+            const page = mData.data.boards[0].items_page;
+            mondayItems = mondayItems.concat(page.items);
+            cursor = page.cursor;
+            hasMore = !!cursor;
+          }
+
+          // Step 4: Match and update
+          const normalize = (s) => s.replace(/[''-–\s]/g, '').replace('ג׳', 'ג');
+
+          // Extract INTERSOL fields helper
+          function extractFields(proj) {
+            const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, project_name: proj.title };
+            const assets = (proj.projectInfo || {}).assets || [];
+            for (const a of assets) {
+              const label = a.label || '';
+              const value = a.value || '';
+              if (typeof value === 'object') {
+                if (value.project_name) result.project_name = value.project_name;
+                if (value.permit_limit) result.permit_limit = value.permit_limit;
+                if (value.connection_size) result.connection_size = value.connection_size;
+                if (value.solar_module) result.solar_module = value.solar_module;
+                if (value.solar_inverter) result.solar_inverter = value.solar_inverter;
+              }
+            }
+            return result;
+          }
+
+          let updated = 0;
+          let matched = 0;
+          const errors = [];
+
+          for (const mItem of mondayItems) {
+            const mNorm = normalize(mItem.name);
+            let bestMatch = null;
+            let bestScore = 0;
+
+            for (const iProj of intersolProjects) {
+              const iFields = extractFields(iProj);
+              const iName = iFields.project_name || iProj.title || '';
+              const iNorm = normalize(iName);
+
+              if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
+
+              if (mNorm === iNorm) { bestMatch = { proj: iProj, fields: iFields, name: iName }; break; }
+              if (mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
+                const score = Math.min(mNorm.length, iNorm.length) / Math.max(mNorm.length, iNorm.length) * 90;
+                if (score > bestScore) { bestMatch = { proj: iProj, fields: iFields, name: iName }; bestScore = score; }
+              }
+            }
+
+            if (!bestMatch) continue;
+            matched++;
+
+            const f = bestMatch.fields;
+            const colValues = {};
+            if (f.solar_module) colValues[COLUMN_MAP.solar_module] = f.solar_module;
+            if (f.solar_inverter) colValues[COLUMN_MAP.solar_inverter] = f.solar_inverter;
+            if (f.kwp) colValues[COLUMN_MAP.max_dc] = String(f.kwp);
+            if (f.kwp) colValues[COLUMN_MAP.kwp] = String(f.kwp);
+            if (f.connection_size) colValues[COLUMN_MAP.connection_size] = f.connection_size;
+            if (f.permit_limit) colValues[COLUMN_MAP.ac_power] = String(f.permit_limit);
+
+            if (Object.keys(colValues).length === 0) continue;
+
+            // Build batch mutation parts (multiple updates in one API call)
+            if (!batchParts) var batchParts = [];
+            batchParts.push({ id: mItem.id, name: mItem.name, colValues });
+          }
+
+          // Execute updates in batches of 10 (single API call each with aliases)
+          const BATCH_SIZE = 10;
+          for (let i = 0; i < (batchParts || []).length; i += BATCH_SIZE) {
+            const batch = batchParts.slice(i, i + BATCH_SIZE);
+            const mutations = batch.map((b, idx) =>
+              `a${idx}: change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${b.id}, column_values: ${JSON.stringify(JSON.stringify(b.colValues))}) { id }`
+            ).join('\n');
+
+            try {
+              const uRes = await fetch('https://api.monday.com/v2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                body: JSON.stringify({ query: `mutation { ${mutations} }` }),
+              });
+              const uData = await uRes.json();
+              if (uData.errors) {
+                batch.forEach(b => errors.push({ project: b.name, error: uData.errors }));
+              } else {
+                updated += batch.length;
+              }
+            } catch (e) {
+              batch.forEach(b => errors.push({ project: b.name, error: e.message }));
+            }
+          }
+
+          return new Response(JSON.stringify({
+            success: true,
+            intersol_total: intersolProjects.length,
+            monday_total: mondayItems.length,
+            matched,
+            updated,
+            errors: errors.length > 0 ? errors : undefined,
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // POST /intersol-media-sync - Upload design images + shortened share links
+      // Processes in chunks of 10 to avoid subrequests limit
+      // Body: { offset: 0 } (optional, defaults to 0)
+      if (url.pathname === '/intersol-media-sync' && request.method === 'POST') {
+        const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
+        const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
+        const INTERSOL_USER = 'SEMO AGS';
+        const INTERSOL_PASS = 'ebFgSoP3Na!(XLX*1Alj4rWB';
+        const SHORTENER_URL = 'https://s-a.gs/q/shorten';
+        const INTERSOL_BASE = 'https://app.intersol-sv.com';
+        const LINK_COLUMN = 'link_mm1k3v67';
+        const CHUNK_SIZE = 10;
+
+        const KNOWN_BAD = new Set(['שוקי -סנדרין|שוקי חזן', 'יקיר יהב|חיים יהב']);
+
+        try {
+          let body = {};
+          try { body = await request.json(); } catch {}
+          const offset = body.offset || 0;
+
+          // Step 1: Login to INTERSOL
+          const tokenRes = await fetch(INTERSOL_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }),
+          });
+          if (!tokenRes.ok) throw new Error('INTERSOL login failed');
+          const token = (await tokenRes.json()).token;
+
+          // Step 2: Fetch all INTERSOL projects
+          const projRes = await fetch(INTERSOL_PROJECTS_URL, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+          });
+          if (!projRes.ok) throw new Error('INTERSOL fetch failed');
+          const intersolProjects = ((await projRes.json()).list || []);
+
+          // Step 3: Fetch Monday projects WITH subitems
+          let mondayItems = [];
+          let cursor = null;
+          let hasMore = true;
+          while (hasMore) {
+            const q = cursor
+              ? `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500, cursor: "${cursor}") { cursor items { id name subitems { id name } } } } }`
+              : `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500) { cursor items { id name subitems { id name } } } } }`;
+            const mRes = await fetch('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+              body: JSON.stringify({ query: q }),
+            });
+            const mData = await mRes.json();
+            const page = mData.data.boards[0].items_page;
+            mondayItems = mondayItems.concat(page.items);
+            cursor = page.cursor;
+            hasMore = !!cursor;
+          }
+
+          // Step 4: Match projects
+          const normalize = (s) => s.replace(/[''-–\s]/g, '').replace('ג׳', 'ג');
+          function getIntersolName(proj) {
+            const assets = (proj.projectInfo || {}).assets || [];
+            for (const a of assets) {
+              if (typeof a.value === 'object' && a.value.project_name) return a.value.project_name;
+            }
+            return proj.title || '';
+          }
+          function getDesignImage(proj) {
+            const di = proj.designInfo;
+            if (!di || !di.assets || !di.assets.length) return null;
+            return di.assets[di.assets.length - 1].value || null;
+          }
+
+          const matches = [];
+          for (const mItem of mondayItems) {
+            const mNorm = normalize(mItem.name);
+            for (const iProj of intersolProjects) {
+              const iName = getIntersolName(iProj);
+              if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
+              const iNorm = normalize(iName);
+              if (mNorm === iNorm || mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
+                const designImage = getDesignImage(iProj);
+                const shareUrl = `${INTERSOL_BASE}/projects/${iProj.id}/${iProj.slug || ''}`;
+                const planSubitem = (mItem.subitems || []).find(s => s.name.includes('תכנון'));
+                if (designImage || shareUrl) {
+                  matches.push({ mondayId: mItem.id, mondayName: mItem.name, designImage, shareUrl, subitemId: planSubitem ? planSubitem.id : null });
+                }
+                break;
+              }
+            }
+          }
+
+          // Step 5: Process chunk
+          const chunk = matches.slice(offset, offset + CHUNK_SIZE);
+          let linksUpdated = 0;
+          let imagesUploaded = 0;
+          const errors = [];
+
+          for (const m of chunk) {
+            // 5a: Shorten share URL and update link column
+            if (m.shareUrl) {
+              try {
+                const shortRes = await fetch(SHORTENER_URL, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ url: m.shareUrl }),
+                });
+                const shortData = await shortRes.json();
+                const shortUrl = shortData.url || m.shareUrl;
+
+                const linkValue = JSON.stringify({ url: shortUrl, text: 'הדמייה' });
+                const mutation = `mutation { change_column_value(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${m.mondayId}, column_id: "${LINK_COLUMN}", value: ${JSON.stringify(linkValue)}) { id } }`;
+                const uRes = await fetch('https://api.monday.com/v2', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                  body: JSON.stringify({ query: mutation }),
+                });
+                const uData = await uRes.json();
+                if (!uData.errors) linksUpdated++;
+                else errors.push({ project: m.mondayName, type: 'link', error: uData.errors });
+              } catch (e) {
+                errors.push({ project: m.mondayName, type: 'link', error: e.message });
+              }
+            }
+
+            // 5b: Upload design image to subitem "תכנון + הצגה ללקוח"
+            if (m.designImage && m.subitemId) {
+              try {
+                // Download image from INTERSOL
+                const imgRes = await fetch(m.designImage, {
+                  headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!imgRes.ok) throw new Error(`Image download failed: ${imgRes.status}`);
+                const imgBlob = await imgRes.blob();
+
+                // Create update on subitem
+                const createUpdateMut = `mutation { create_update(item_id: ${m.subitemId}, body: "תמונת הדמייה מ-INTERSOL") { id } }`;
+                const updateRes = await fetch('https://api.monday.com/v2', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                  body: JSON.stringify({ query: createUpdateMut }),
+                });
+                const updateData = await updateRes.json();
+                if (updateData.errors) throw new Error(JSON.stringify(updateData.errors));
+                const updateId = updateData.data.create_update.id;
+
+                // Upload file to the update
+                const ext = m.designImage.split('.').pop().split('?')[0] || 'jpg';
+                const formData = new FormData();
+                formData.append('query', `mutation ($file: File!) { add_file_to_update(update_id: ${updateId}, file: $file) { id } }`);
+                formData.append('map', '{"image":"variables.file"}');
+                formData.append('image', imgBlob, `design.${ext}`);
+
+                const uploadRes = await fetch('https://api.monday.com/v2/file', {
+                  method: 'POST',
+                  headers: { 'Authorization': env.MONDAY_API_TOKEN },
+                  body: formData,
+                });
+                const uploadData = await uploadRes.json();
+                if (!uploadData.errors) imagesUploaded++;
+                else errors.push({ project: m.mondayName, type: 'image', error: uploadData.errors });
+              } catch (e) {
+                errors.push({ project: m.mondayName, type: 'image', error: e.message });
+              }
+            }
+          }
+
+          const hasMore2 = offset + CHUNK_SIZE < matches.length;
+
+          return new Response(JSON.stringify({
+            success: true,
+            total_matches: matches.length,
+            processed_offset: offset,
+            processed_count: chunk.length,
+            links_updated: linksUpdated,
+            images_uploaded: imagesUploaded,
+            has_more: hasMore2,
+            next_offset: hasMore2 ? offset + CHUNK_SIZE : null,
+            errors: errors.length > 0 ? errors : undefined,
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       return new Response('Not Found', { status: 404, headers: corsHeaders });
 
     } catch (error) {
