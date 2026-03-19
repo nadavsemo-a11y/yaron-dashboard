@@ -714,7 +714,7 @@ export default {
           }
 
           // Step 4: Match and update
-          const normalize = (s) => s.replace(/[''-–\s]/g, '').replace('ג׳', 'ג');
+          const normalize = (s) => s.replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
 
           // Extract INTERSOL fields helper
           function extractFields(proj) {
@@ -876,12 +876,13 @@ export default {
             hasMore = !!cursor;
           }
 
-          // Step 4: Match projects
-          const normalize = (s) => s.replace(/[''-–\s]/g, '').replace('ג׳', 'ג');
+          // Step 4: Match projects (same logic as /intersol-sync)
+          const normalize = (s) => s.replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
+
           function getIntersolName(proj) {
             const assets = (proj.projectInfo || {}).assets || [];
             for (const a of assets) {
-              if (typeof a.value === 'object' && a.value.project_name) return a.value.project_name;
+              if (typeof a.value === 'object' && a.value && a.value.project_name) return a.value.project_name;
             }
             return proj.title || '';
           }
@@ -894,19 +895,27 @@ export default {
           const matches = [];
           for (const mItem of mondayItems) {
             const mNorm = normalize(mItem.name);
+
+            let bestMatch = null;
+            let bestScore = 0;
+
             for (const iProj of intersolProjects) {
               const iName = getIntersolName(iProj);
               if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
               const iNorm = normalize(iName);
-              if (mNorm === iNorm || mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
-                const designImage = getDesignImage(iProj);
-                const shareUrl = `${INTERSOL_BASE}/projects/${iProj.id}/${iProj.slug || ''}`;
-                const planSubitem = (mItem.subitems || []).find(s => s.name.includes('תכנון'));
-                if (designImage || shareUrl) {
-                  matches.push({ mondayId: mItem.id, mondayName: mItem.name, designImage, shareUrl, subitemId: planSubitem ? planSubitem.id : null });
-                }
-                break;
+
+              if (mNorm === iNorm) { bestMatch = iProj; bestScore = 100; break; }
+              if (mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
+                const score = Math.min(mNorm.length, iNorm.length) / Math.max(mNorm.length, iNorm.length) * 90;
+                if (score > bestScore) { bestMatch = iProj; bestScore = score; }
               }
+            }
+
+            if (bestMatch) {
+              const designImage = getDesignImage(bestMatch);
+              const shareUrl = `${INTERSOL_BASE}/projects/${bestMatch.id}/${bestMatch.slug || ''}`;
+              const planSubitem = (mItem.subitems || []).find(s => s.name.includes('תכנון') && !s.name.includes('סופי'));
+              matches.push({ mondayId: mItem.id, mondayName: mItem.name, intersolName: getIntersolName(bestMatch), designImage, shareUrl, subitemId: planSubitem ? planSubitem.id : null, hasDesignInfo: !!(bestMatch.designInfo && bestMatch.designInfo.assets), score: bestScore });
             }
           }
 
@@ -915,6 +924,9 @@ export default {
           let linksUpdated = 0;
           let imagesUploaded = 0;
           const errors = [];
+          // Debug: show first 5 INTERSOL names for verification
+          const iSample = intersolProjects.slice(0, 5).map(p => ({ title: p.title, extractedName: getIntersolName(p), hasDI: !!(p.designInfo && p.designInfo.assets) }));
+          const debug = chunk.map(m => ({ name: m.mondayName, iName: m.intersolName, hasImage: !!m.designImage, hasSubitem: !!m.subitemId, hasDI: m.hasDesignInfo, score: m.score }));
 
           for (const m of chunk) {
             // 5a: Shorten share URL and update link column
@@ -986,6 +998,8 @@ export default {
           }
 
           const hasMore2 = offset + CHUNK_SIZE < matches.length;
+          const noSubitem = chunk.filter(m => !m.subitemId).map(m => m.mondayName);
+          const noImage = chunk.filter(m => !m.designImage).map(m => m.mondayName);
 
           return new Response(JSON.stringify({
             success: true,
@@ -996,7 +1010,11 @@ export default {
             images_uploaded: imagesUploaded,
             has_more: hasMore2,
             next_offset: hasMore2 ? offset + CHUNK_SIZE : null,
+            skipped_no_subitem: noSubitem.length > 0 ? noSubitem : undefined,
+            skipped_no_image: noImage.length > 0 ? noImage : undefined,
             errors: errors.length > 0 ? errors : undefined,
+            debug,
+            intersol_sample: iSample,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
