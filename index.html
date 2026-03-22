@@ -1109,7 +1109,35 @@
 
   loadTasks().then(() => {
     enableIntroButton();
+    // Background INTERSOL sync — silent, non-blocking
+    backgroundSync();
   });
+
+  async function backgroundSync() {
+    try {
+      const res = await fetch(`${WORKER_URL}/intersol-sync`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) return;
+
+      // Quiet toast only if something actually updated
+      if (data.updated > 0) {
+        showToast(`☀️ סנכרון רקע: ${data.matched} הותאמו, ${data.updated} עודכנו`);
+        // Refresh task data silently to pick up new column values
+        const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
+        if (taskRes.ok) {
+          allTasks = await taskRes.json();
+          renderFiltered();
+        }
+      }
+
+      // Show fuzzy match modal if suggestions exist
+      if (data.pendingMatches && data.pendingMatches.length > 0) {
+        showMatchModal(data.pendingMatches);
+      }
+    } catch {
+      // Silent fail — background sync should never bother the user
+    }
+  }
 
 </script>
 </body>

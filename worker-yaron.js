@@ -956,8 +956,8 @@ export default {
             }
           }
 
-          // Execute updates in batches of 10
-          const BATCH_SIZE = 10;
+          // Execute updates in batches of 25 (Monday supports up to 50)
+          const BATCH_SIZE = 25;
           for (let i = 0; i < batchParts.length; i += BATCH_SIZE) {
             const batch = batchParts.slice(i, i + BATCH_SIZE);
             const mutations = batch.map((b, idx) =>
