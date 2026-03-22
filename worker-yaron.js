@@ -862,10 +862,24 @@ export default {
             return result;
           }
 
+          // Levenshtein distance for fuzzy matching
+          function levenshtein(a, b) {
+            const m = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+            for (let j = 0; j <= b.length; j++) m[0][j] = j;
+            for (let i = 1; i <= a.length; i++)
+              for (let j = 1; j <= b.length; j++)
+                m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+            return 1 - m[a.length][b.length] / Math.max(a.length, b.length);
+          }
+
           let updated = 0;
           let matched = 0;
           const errors = [];
+          const batchParts = [];
+          const matchedMondayIds = new Set();
+          const matchedIntersolNorms = new Set();
 
+          // Step 4a: Exact + substring matching (high confidence)
           for (const mItem of mondayItems) {
             const mNorm = normalize(mItem.name);
             let bestMatch = null;
@@ -878,15 +892,17 @@ export default {
 
               if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
 
-              if (mNorm === iNorm) { bestMatch = { proj: iProj, fields: iFields, name: iName }; break; }
+              if (mNorm === iNorm) { bestMatch = { proj: iProj, fields: iFields, name: iName, norm: iNorm }; break; }
               if (mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
                 const score = Math.min(mNorm.length, iNorm.length) / Math.max(mNorm.length, iNorm.length) * 90;
-                if (score > bestScore) { bestMatch = { proj: iProj, fields: iFields, name: iName }; bestScore = score; }
+                if (score > bestScore) { bestMatch = { proj: iProj, fields: iFields, name: iName, norm: iNorm }; bestScore = score; }
               }
             }
 
             if (!bestMatch) continue;
             matched++;
+            matchedMondayIds.add(mItem.id);
+            matchedIntersolNorms.add(bestMatch.norm);
 
             const f = bestMatch.fields;
             const colValues = {};
@@ -898,15 +914,51 @@ export default {
             if (f.permit_limit) colValues[COLUMN_MAP.ac_power] = String(f.permit_limit);
 
             if (Object.keys(colValues).length === 0) continue;
-
-            // Build batch mutation parts (multiple updates in one API call)
-            if (!batchParts) var batchParts = [];
             batchParts.push({ id: mItem.id, name: mItem.name, colValues });
           }
 
-          // Execute updates in batches of 10 (single API call each with aliases)
+          // Step 4b: Fuzzy matching for unmatched items (pending user approval)
+          const pendingMatches = [];
+          const FUZZY_THRESHOLD = 0.55;
+          const unmatchedMonday = mondayItems.filter(m => !matchedMondayIds.has(m.id));
+
+          for (const mItem of unmatchedMonday) {
+            const mNorm = normalize(mItem.name);
+            // Skip test/template items
+            if (/תבנית|טסט|בדיקה|ניסויים/.test(mItem.name)) continue;
+
+            let bestSim = 0;
+            let bestCandidate = null;
+
+            for (const iProj of intersolProjects) {
+              const iFields = extractFields(iProj);
+              const iName = iFields.project_name || iProj.title || '';
+              const iNorm = normalize(iName);
+
+              if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
+              if (matchedIntersolNorms.has(iNorm)) continue; // already matched
+
+              const sim = levenshtein(mNorm, iNorm);
+              if (sim > bestSim) {
+                bestSim = sim;
+                bestCandidate = { name: iName, fields: iFields, norm: iNorm };
+              }
+            }
+
+            if (bestCandidate && bestSim >= FUZZY_THRESHOLD) {
+              pendingMatches.push({
+                mondayId: mItem.id,
+                mondayName: mItem.name,
+                intersolName: bestCandidate.name,
+                similarity: Math.round(bestSim * 100),
+                intersolFields: bestCandidate.fields,
+              });
+            }
+          }
+
+          // Execute updates in batches of 10
           const BATCH_SIZE = 10;
-          for (let i = 0; i < (batchParts || []).length; i += BATCH_SIZE) {
+          for (let i = 0; i < batchParts.length; i += BATCH_SIZE) {
             const batch = batchParts.slice(i, i + BATCH_SIZE);
             const mutations = batch.map((b, idx) =>
               `a${idx}: change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${b.id}, column_values: ${JSON.stringify(JSON.stringify(b.colValues))}) { id }`
@@ -929,34 +981,6 @@ export default {
             }
           }
 
-          // Debug: return match details for inspection
-          const debugParam = url.searchParams.get('debug');
-          let debugInfo;
-          if (debugParam) {
-            // Check batchParts for matched items
-            const matched_debug = (batchParts || []).filter(b =>
-              b.name.includes(debugParam)
-            ).map(b => ({ name: b.name, id: b.id, colValues: b.colValues }));
-
-            // Check unmatched Monday items
-            const matchedIds = new Set((batchParts || []).map(b => b.id));
-            const unmatched_monday = mondayItems.filter(m =>
-              m.name.includes(debugParam) && !matchedIds.has(m.id)
-            ).map(m => ({ name: m.name, id: m.id, normalized: normalize(m.name) }));
-
-            // Check INTERSOL projects
-            const intersol_matches = intersolProjects.filter(p => {
-              const f = extractFields(p);
-              const n = f.project_name || p.title || '';
-              return n.includes(debugParam);
-            }).map(p => {
-              const f = extractFields(p);
-              return { title: p.title, project_name: f.project_name, normalized: normalize(f.project_name || p.title || ''), fields: f };
-            });
-
-            debugInfo = { matched_debug, unmatched_monday, intersol_matches };
-          }
-
           return new Response(JSON.stringify({
             success: true,
             intersol_total: intersolProjects.length,
@@ -964,7 +988,7 @@ export default {
             matched,
             updated,
             errors: errors.length > 0 ? errors : undefined,
-            debug: debugInfo,
+            pendingMatches: pendingMatches.length > 0 ? pendingMatches : undefined,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
@@ -973,6 +997,61 @@ export default {
           return new Response(JSON.stringify({ success: false, error: e.message }), {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // POST /apply-match - Apply a fuzzy match: rename Monday item + update columns
+      // body: { mondayId, intersolFields }
+      if (url.pathname === '/apply-match' && request.method === 'POST') {
+        try {
+          const body = await request.json();
+          const { mondayId, intersolFields } = body;
+          if (!mondayId || !intersolFields) {
+            return new Response(JSON.stringify({ success: false, error: 'Missing mondayId or intersolFields' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          const COLUMN_MAP = {
+            solar_module: 'text_mm1besx6',
+            solar_inverter: 'text_mm1b2dx7',
+            max_dc: 'numeric_mm1bdmv6',
+            connection_size: 'text_mm1b1hq5',
+            kwp: 'numeric_mkyw4dcb',
+            ac_power: 'numeric_mkyxfrg9',
+          };
+
+          const colValues = {};
+          if (intersolFields.solar_module) colValues[COLUMN_MAP.solar_module] = intersolFields.solar_module;
+          if (intersolFields.solar_inverter) colValues[COLUMN_MAP.solar_inverter] = intersolFields.solar_inverter;
+          if (intersolFields.kwp) colValues[COLUMN_MAP.max_dc] = String(intersolFields.kwp);
+          if (intersolFields.kwp) colValues[COLUMN_MAP.kwp] = String(intersolFields.kwp);
+          if (intersolFields.connection_size) colValues[COLUMN_MAP.connection_size] = intersolFields.connection_size;
+          if (intersolFields.permit_limit) colValues[COLUMN_MAP.ac_power] = String(intersolFields.permit_limit);
+
+          // Update column values
+          if (Object.keys(colValues).length > 0) {
+            const mutation = `mutation { change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${mondayId}, column_values: ${JSON.stringify(JSON.stringify(colValues))}) { id } }`;
+            const res = await fetch('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+              body: JSON.stringify({ query: mutation }),
+            });
+            const data = await res.json();
+            if (data.errors) {
+              return new Response(JSON.stringify({ success: false, error: data.errors }), {
+                status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+          }
+
+          return new Response(JSON.stringify({ success: true, mondayId }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
       }
