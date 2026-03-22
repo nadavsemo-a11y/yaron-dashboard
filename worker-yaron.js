@@ -929,6 +929,34 @@ export default {
             }
           }
 
+          // Debug: return match details for inspection
+          const debugParam = url.searchParams.get('debug');
+          let debugInfo;
+          if (debugParam) {
+            // Check batchParts for matched items
+            const matched_debug = (batchParts || []).filter(b =>
+              b.name.includes(debugParam)
+            ).map(b => ({ name: b.name, id: b.id, colValues: b.colValues }));
+
+            // Check unmatched Monday items
+            const matchedIds = new Set((batchParts || []).map(b => b.id));
+            const unmatched_monday = mondayItems.filter(m =>
+              m.name.includes(debugParam) && !matchedIds.has(m.id)
+            ).map(m => ({ name: m.name, id: m.id, normalized: normalize(m.name) }));
+
+            // Check INTERSOL projects
+            const intersol_matches = intersolProjects.filter(p => {
+              const f = extractFields(p);
+              const n = f.project_name || p.title || '';
+              return n.includes(debugParam);
+            }).map(p => {
+              const f = extractFields(p);
+              return { title: p.title, project_name: f.project_name, normalized: normalize(f.project_name || p.title || ''), fields: f };
+            });
+
+            debugInfo = { matched_debug, unmatched_monday, intersol_matches };
+          }
+
           return new Response(JSON.stringify({
             success: true,
             intersol_total: intersolProjects.length,
@@ -936,6 +964,7 @@ export default {
             matched,
             updated,
             errors: errors.length > 0 ? errors : undefined,
+            debug: debugInfo,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
