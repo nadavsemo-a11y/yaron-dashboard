@@ -394,6 +394,73 @@ export default {
         });
       }
 
+      // GET /suppliers - List all suppliers with phone numbers
+      if (url.pathname === '/suppliers' && request.method === 'GET') {
+        try {
+          const query = `query { boards(ids: [5089266595]) { items_page(limit: 100) { items { id name column_values(ids: ["phone_mkywgg4z"]) { text value } } } } }`;
+          const res = await fetch('https://api.monday.com/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+            body: JSON.stringify({ query }),
+          });
+          const data = await res.json();
+          const suppliers = (data.data?.boards?.[0]?.items_page?.items || []).map(s => {
+            const phoneCol = s.column_values?.[0];
+            let phone = phoneCol?.text || '';
+            if (!phone && phoneCol?.value) { try { phone = JSON.parse(phoneCol.value).phone || ''; } catch {} }
+            return { id: s.id, name: s.name, phone };
+          });
+          return new Response(JSON.stringify(suppliers), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // POST /assign-supplier - Assign a supplier to a subitem via board relation
+      if (url.pathname === '/assign-supplier' && request.method === 'POST') {
+        try {
+          const body = await request.json();
+          const { subitemId, supplierId } = body;
+          if (!subitemId || !supplierId) {
+            return new Response(JSON.stringify({ error: 'Missing subitemId or supplierId' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+
+          // Set board relation on the subitem (link to supplier)
+          const mutation = `mutation {
+            change_column_value(
+              board_id: ${env.MONDAY_SUBITEMS_BOARD_ID},
+              item_id: ${subitemId},
+              column_id: "board_relation_mkyw3bx3",
+              value: ${JSON.stringify(JSON.stringify({ item_ids: [parseInt(supplierId)] }))}
+            ) { id }
+          }`;
+          const res = await fetch('https://api.monday.com/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+            body: JSON.stringify({ query: mutation }),
+          });
+          const data = await res.json();
+          if (data.errors) {
+            return new Response(JSON.stringify({ success: false, error: data.errors }), {
+              status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       // GET /buttons - Fetch button configurations from Monday
       if (url.pathname === '/buttons' && request.method === 'GET') {
         const query = `

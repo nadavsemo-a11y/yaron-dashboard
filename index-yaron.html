@@ -385,6 +385,24 @@
     background: rgba(37,211,102,0.22);
     border-color: rgba(37,211,102,0.5);
   }
+  .btn-action.btn-assign {
+    background: rgba(79,142,247,0.1);
+    color: var(--accent);
+    border-color: rgba(79,142,247,0.35);
+  }
+  .btn-action.btn-assign:hover {
+    background: rgba(79,142,247,0.22);
+    border-color: rgba(79,142,247,0.5);
+  }
+  .supplier-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text); font-family: inherit;
+    font-size: 14px; cursor: pointer; transition: all 0.15s; width: 100%;
+  }
+  .supplier-item:hover { border-color: var(--accent); background: rgba(79,142,247,0.08); }
+  .supplier-name { font-weight: 600; }
+  .supplier-phone { font-size: 12px; color: var(--text-muted); direction: ltr; }
   .btn-action .wa-icon {
     font-size: 14px;
   }
@@ -1654,7 +1672,17 @@
     const buttons = getButtonsForTask(task.name);
     if (buttons.length === 0) return '';
     const info = task.parentInfo || {};
-    // Generate a placeholder link; real vendor link is loaded async on click
+
+    // If task has matching button but no supplier assigned → show "שייך קבלן"
+    if (!task.supplier) {
+      return buttons.map(b =>
+        `<a class="btn-action btn-assign" href="#" onclick="event.preventDefault(); event.stopPropagation(); openSupplierPicker('${task.id}', '${escHtml(task.name)}')">
+          <span class="wa-icon">👤</span>שייך קבלן
+        </a>`
+      ).join('');
+    }
+
+    // Supplier assigned → show WhatsApp button
     return buttons.map(b => {
       const phone = formatPhone(task.supplierPhone || b.phone);
       const btnId = `wa-${task.id}-${b.id}`;
@@ -1678,6 +1706,86 @@
 
     window.open(waUrl, '_blank');
     actionButtonClicked(taskId, task.name);
+  }
+
+  // ── Supplier Picker ──
+  let suppliersList = null;
+  let pickerTaskId = null;
+
+  async function openSupplierPicker(taskId, taskName) {
+    pickerTaskId = taskId;
+
+    // Fetch suppliers list (cache after first load)
+    if (!suppliersList) {
+      try {
+        const res = await fetch(`${WORKER_URL}/suppliers`);
+        suppliersList = await res.json();
+      } catch {
+        showToast('שגיאה בטעינת ספקים');
+        return;
+      }
+    }
+
+    // Remove existing picker
+    document.getElementById('supplierPickerModal')?.remove();
+
+    const items = suppliersList.map(s =>
+      `<button class="supplier-item" onclick="assignSupplier('${s.id}', '${escHtml(s.name)}')">
+        <span class="supplier-name">${escHtml(s.name)}</span>
+        <span class="supplier-phone">${escHtml(s.phone || '')}</span>
+      </button>`
+    ).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'supplierPickerModal';
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:500;
+        display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)closeSupplierPicker()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;
+          padding:24px;width:340px;max-height:70vh;overflow:auto;box-shadow:0 8px 48px rgba(0,0,0,0.4);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="font-size:16px;font-weight:700;">בחר קבלן/ספק</h3>
+            <button onclick="closeSupplierPicker()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">${items}</div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  async function assignSupplier(supplierId, supplierName) {
+    closeSupplierPicker();
+    if (!pickerTaskId) return;
+    showToast(`משייך ${supplierName}...`);
+
+    try {
+      const res = await fetch(`${WORKER_URL}/assign-supplier`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subitemId: pickerTaskId, supplierId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`${supplierName} שוייך בהצלחה`);
+        // Update local task data
+        const task = allTasks.find(t => t.id === pickerTaskId);
+        if (task) {
+          task.supplier = supplierName;
+          task.supplierId = supplierId;
+          const sup = suppliersList?.find(s => s.id === supplierId);
+          if (sup) task.supplierPhone = sup.phone || '';
+        }
+        renderFiltered();
+      } else {
+        showToast(`שגיאה: ${data.error}`);
+      }
+    } catch (e) {
+      showToast(`שגיאה: ${e.message}`);
+    }
+  }
+
+  function closeSupplierPicker() {
+    document.getElementById('supplierPickerModal')?.remove();
   }
 
   // After clicking an action button, advance status to בתהליך
@@ -1818,12 +1926,18 @@
 
     let waButtons = '';
     if (buttons.length > 0) {
-      waButtons = buttons.map(b => {
-        const phone = formatPhone(t.supplierPhone || b.phone);
-        return `<a class="mobile-action-btn wa-btn" href="#" onclick="event.preventDefault(); event.stopPropagation(); openVendorWhatsApp('${t.id}', '${b.id}', '${phone}')">
-          <span class="ma-icon">📱</span>${escHtml(b.buttonLabel)}
+      if (!t.supplier) {
+        waButtons = `<a class="mobile-action-btn wa-btn" style="background:rgba(79,142,247,0.1);color:var(--accent);border-color:rgba(79,142,247,0.35);" href="#" onclick="event.preventDefault(); event.stopPropagation(); openSupplierPicker('${t.id}', '${escHtml(t.name)}')">
+          <span class="ma-icon">👤</span>שייך קבלן
         </a>`;
-      }).join('');
+      } else {
+        waButtons = buttons.map(b => {
+          const phone = formatPhone(t.supplierPhone || b.phone);
+          return `<a class="mobile-action-btn wa-btn" href="#" onclick="event.preventDefault(); event.stopPropagation(); openVendorWhatsApp('${t.id}', '${b.id}', '${phone}')">
+            <span class="ma-icon">📱</span>${escHtml(b.buttonLabel)}
+          </a>`;
+        }).join('');
+      }
     }
 
     let surveyBtn = '';
