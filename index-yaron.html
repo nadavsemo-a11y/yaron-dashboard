@@ -1598,7 +1598,33 @@
     );
   }
 
-  function buildMessage(template, info, projectName, supplier) {
+  // Vendor portal links cache: supplierName → portalUrl
+  const vendorLinkCache = {};
+
+  async function getVendorPortalLink(supplierName, taskRef) {
+    if (!supplierName) return '';
+    if (vendorLinkCache[supplierName]) {
+      return vendorLinkCache[supplierName] + (taskRef ? `?highlight=${taskRef}` : '');
+    }
+    // Look up supplier in allTasks to find supplierId
+    const task = allTasks.find(t => t.supplier === supplierName);
+    if (!task || !task.supplierId) return '';
+    try {
+      const res = await fetch('https://s-a.gs/v/api/create-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierId: task.supplierId, supplierName }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        vendorLinkCache[supplierName] = data.url;
+        return data.url + (taskRef ? `?highlight=${taskRef}` : '');
+      }
+    } catch {}
+    return '';
+  }
+
+  function buildMessage(template, info, projectName, supplier, vendorLink) {
     if (!template) return '';
     return template
       .replace(/\{שם_פרויקט\}/g, projectName || '')
@@ -1611,7 +1637,8 @@
       .replace(/\{חיבור\}/g, info.connectionSize || '')
       .replace(/\{שלב\}/g, info.stage || '')
       .replace(/\{טלפון\}/g, info.phone || '')
-      .replace(/\{ספק\}/g, supplier || '');
+      .replace(/\{ספק\}/g, supplier || '')
+      .replace(/\{לינק_ספק\}/g, vendorLink || '');
   }
 
   function formatPhone(phone) {
@@ -1627,15 +1654,30 @@
     const buttons = getButtonsForTask(task.name);
     if (buttons.length === 0) return '';
     const info = task.parentInfo || {};
+    // Generate a placeholder link; real vendor link is loaded async on click
     return buttons.map(b => {
-      const msg = buildMessage(b.template, info, task.parentName, task.supplier);
-      // Use supplier phone from the task (from suppliers board), fallback to button config phone
       const phone = formatPhone(task.supplierPhone || b.phone);
-      const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-      return `<a class="btn-action" href="${waUrl}" target="_blank" onclick="event.stopPropagation(); actionButtonClicked('${task.id}', '${escHtml(task.name)}')">
+      const btnId = `wa-${task.id}-${b.id}`;
+      return `<a class="btn-action" id="${btnId}" href="#" onclick="event.preventDefault(); event.stopPropagation(); openVendorWhatsApp('${task.id}', '${b.id}', '${phone}')">
         <span class="wa-icon">📱</span>${escHtml(b.buttonLabel)}
       </a>`;
     }).join('');
+  }
+
+  async function openVendorWhatsApp(taskId, buttonId, phone) {
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task) return;
+    const btn = allButtons.find(b => b.id === buttonId);
+    if (!btn) return;
+    const info = task.parentInfo || {};
+
+    // Get or create vendor portal link
+    const vendorLink = await getVendorPortalLink(task.supplier, null);
+    const msg = buildMessage(btn.template, info, task.parentName, task.supplier, vendorLink);
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+
+    window.open(waUrl, '_blank');
+    actionButtonClicked(taskId, task.name);
   }
 
   // After clicking an action button, advance status to בתהליך
@@ -1777,10 +1819,8 @@
     let waButtons = '';
     if (buttons.length > 0) {
       waButtons = buttons.map(b => {
-        const msg = buildMessage(b.template, info, t.parentName, t.supplier);
         const phone = formatPhone(t.supplierPhone || b.phone);
-        const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-        return `<a class="mobile-action-btn wa-btn" href="${waUrl}" target="_blank" onclick="event.stopPropagation(); actionButtonClicked('${t.id}', '${escHtml(t.name)}')">
+        return `<a class="mobile-action-btn wa-btn" href="#" onclick="event.preventDefault(); event.stopPropagation(); openVendorWhatsApp('${t.id}', '${b.id}', '${phone}')">
           <span class="ma-icon">📱</span>${escHtml(b.buttonLabel)}
         </a>`;
       }).join('');

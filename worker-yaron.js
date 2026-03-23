@@ -254,6 +254,7 @@ export default {
                 col => col.id === 'board_relation_mkyw3bx3'
               );
               const supplier = supplierColumn ? (supplierColumn.display_value || supplierColumn.text || '') : '';
+              const supplierId = (supplierColumn && supplierColumn.linked_item_ids && supplierColumn.linked_item_ids.length > 0) ? supplierColumn.linked_item_ids[0] : '';
 
               const personMatch = showAll ? true : isYaron;
               if (personMatch && (status === 'ממתין' || status === 'בתהליך' || status === 'טרם החל')) {
@@ -268,6 +269,7 @@ export default {
                   date: taskDate,
                   person: personColumn ? personColumn.text : '',
                   supplier: supplier,
+                  supplierId: supplierId,
                   supplierPhone: (supplier && supplierMap[supplier]) ? supplierMap[supplier].phone : '',
                   hasClientLinked: (() => { const cc = item.column_values.find(c => c.id === 'board_relation_mkywy46r'); return !!(cc && cc.linked_item_ids && cc.linked_item_ids.length > 0); })(),
                 });
