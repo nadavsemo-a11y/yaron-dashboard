@@ -1788,16 +1788,24 @@
     document.getElementById('supplierPickerModal')?.remove();
   }
 
-  // After clicking an action button, advance status to בתהליך
+  // After clicking an action button, advance status to בתהליך + set planned date to today
   async function actionButtonClicked(itemId, name) {
     const task = allTasks.find(t => t.id === itemId);
     if (!task || task.status === 'בתהליך' || task.status === 'בוצע') return;
     try {
+      // Set status to בתהליך
       await fetch(`${WORKER_URL}/update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ itemId, newStatus: 'בתהליך' }),
       });
+      // Set planned date to today
+      const today = new Date().toISOString().slice(0, 10);
+      fetch(`${WORKER_URL}/update-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId, date: today, columnId: 'date_mm1qrxf0' }),
+      }).catch(() => {});
       task.status = 'בתהליך';
       renderStats();
       renderFiltered();
