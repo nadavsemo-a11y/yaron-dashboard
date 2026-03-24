@@ -2307,24 +2307,27 @@
         updateSyncLine('design', `תכניות הקמה: ${dp.uploaded} הועלו, ${dp.skipped} ללא שינוי`, true);
       }
 
-      // Phase 2: Media sync (images + short links) in chunks
-      let offset = 0, totalLinks = 0, totalImages = 0, totalMatches = 0, hasMore = true;
-      while (hasMore) {
-        updateSyncLine('media', `מדיה: ${offset}/${totalMatches || '?'}...`, false);
-        const res2 = await fetch(`${WORKER_URL}/intersol-media-sync`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ offset }),
-        });
-        const data2 = await res2.json();
-        if (!data2.success) { updateSyncLine('media', `שגיאה: ${data2.error}`, true); break; }
-        totalMatches = data2.total_matches;
-        totalLinks += data2.links_updated;
-        totalImages += data2.images_uploaded;
-        hasMore = data2.has_more;
-        offset = data2.next_offset || 0;
-      }
-      updateSyncLine('media', `${totalLinks} קישורים, ${totalImages} תמונות`, true);
+      // Phase 2: Media sync (images + short links) in chunks — optional, may hit subrequests limit
+      try {
+        let offset = 0, totalLinks = 0, totalImages = 0, totalMatches = 0, hasMore = true;
+        while (hasMore) {
+          updateSyncLine('media', `מדיה: ${offset}/${totalMatches || '?'}...`, false);
+          const res2 = await fetch(`${WORKER_URL}/intersol-media-sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ offset }),
+          });
+          if (!res2.ok) { updateSyncLine('media', 'מדיה: דילוג (מגבלת שרת)', true); break; }
+          const data2 = await res2.json();
+          if (!data2.success) { updateSyncLine('media', `מדיה: ${data2.error || 'שגיאה'}`, true); break; }
+          totalMatches = data2.total_matches;
+          totalLinks += data2.links_updated;
+          totalImages += data2.images_uploaded;
+          hasMore = data2.has_more;
+          offset = data2.next_offset || 0;
+        }
+        if (totalLinks > 0 || totalImages > 0) updateSyncLine('media', `${totalLinks} קישורים, ${totalImages} תמונות`, true);
+      } catch { updateSyncLine('media', 'מדיה: דילוג', true); }
 
       // Show multi-candidate match modal if needed
       if (data1.pendingMatches && data1.pendingMatches.length > 0) {
