@@ -934,6 +934,29 @@
     setTimeout(() => t.classList.remove('show'), 3000);
   }
 
+  // ── INTERSOL Sync Status Widget ──
+  function showSyncStatus() {
+    if (document.getElementById('syncStatus')) return document.getElementById('syncStatus');
+    const el = document.createElement('div');
+    el.id = 'syncStatus';
+    el.style.cssText = 'position:fixed;bottom:20px;left:20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;z-index:400;box-shadow:0 4px 24px rgba(0,0,0,0.3);min-width:260px;transition:opacity 0.3s;';
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;">☀️ סנכרון INTERSOL</div><div id="syncLines"></div>';
+    document.body.appendChild(el);
+    return el;
+  }
+  function updateSyncLine(key, text, done) {
+    const container = document.getElementById('syncLines');
+    if (!container) return;
+    let line = document.getElementById(`sync-${key}`);
+    if (!line) { line = document.createElement('div'); line.id = `sync-${key}`; line.style.cssText = 'padding:2px 0;color:var(--text-muted);'; container.appendChild(line); }
+    line.innerHTML = `${done ? '✓' : '<span style="display:inline-block;animation:spin 0.8s linear infinite;">⟳</span>'} ${text}`;
+    if (done) line.style.color = '#6dbf67';
+  }
+  function hideSyncStatus() {
+    const el = document.getElementById('syncStatus');
+    if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }
+  }
+
   // ── INTERSOL Sync ──
   async function scanIntersol() {
     const btn = document.getElementById('intersolBtn');
@@ -941,24 +964,41 @@
     btn.disabled = true;
     icon.style.animation = 'spin 0.8s linear infinite';
     btn.querySelector('#intersolIcon').nextSibling.textContent = ' סורק...';
-    showToast('מתחבר ל-INTERSOL...');
+
+    showSyncStatus();
+    updateSyncLine('connect', 'מתחבר ל-INTERSOL...', false);
 
     try {
+      updateSyncLine('connect', 'שולף נתונים ומתאים פרויקטים...', false);
       const res = await fetch(`${WORKER_URL}/intersol-sync`, { method: 'POST' });
       const data = await res.json();
 
       if (data.success) {
-        showToast(`☀️ INTERSOL: ${data.matched} פרויקטים הותאמו, ${data.updated} עודכנו במאנדי`);
+        updateSyncLine('connect', `${data.intersol_total} פרויקטים נסרקו`, true);
+        updateSyncLine('match', `${data.matched} הותאמו אוטומטית, ${data.updated} עודכנו`, true);
 
-        // Show fuzzy match suggestions if any
+        const dp = data.designPlans || {};
+        if (dp.uploaded > 0 || dp.skipped > 0) {
+          updateSyncLine('design', `תכניות הקמה: ${dp.uploaded} הועלו, ${dp.skipped} ללא שינוי`, true);
+        }
+
         if (data.pendingMatches && data.pendingMatches.length > 0) {
+          updateSyncLine('pending', `${data.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
           showMatchModal(data.pendingMatches);
         }
+
+        // Refresh dashboard data
+        const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
+        if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+
+        setTimeout(hideSyncStatus, 5000);
       } else {
-        showToast(`שגיאה: ${data.error}`);
+        updateSyncLine('connect', `שגיאה: ${data.error}`, true);
+        setTimeout(hideSyncStatus, 5000);
       }
     } catch (e) {
-      showToast(`שגיאת חיבור: ${e.message}`);
+      updateSyncLine('connect', `שגיאת חיבור: ${e.message}`, true);
+      setTimeout(hideSyncStatus, 5000);
     } finally {
       btn.disabled = false;
       icon.style.animation = '';
@@ -966,113 +1006,122 @@
     }
   }
 
-  // ── Fuzzy Match Approval Modal ──
-  function showMatchModal(matches) {
-    // Remove existing modal if any
+  // ── Multi-Candidate Match Modal ──
+  let _matchCandidates = [];
+  let _matchSelected = [];
+
+  function scoreBadge(score) {
+    const bg = score >= 80 ? 'rgba(107,191,103,0.2)' : score >= 60 ? 'rgba(240,165,0,0.2)' : 'rgba(224,92,92,0.15)';
+    const fg = score >= 80 ? '#6dbf67' : score >= 60 ? '#f0a500' : '#e05c5c';
+    return `<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;">${score}%</span>`;
+  }
+
+  function showMatchModal(candidates) {
     document.getElementById('matchModal')?.remove();
+    _matchCandidates = candidates;
+    _matchSelected = new Array(candidates.length).fill(-1);
 
-    const rows = matches.map((m, i) => `
-      <tr id="match-row-${i}" style="border-bottom:1px solid var(--border);">
-        <td style="padding:10px 12px; font-weight:600;">${escHtml(m.mondayName)}</td>
-        <td style="padding:10px 12px; text-align:center; font-size:20px; color:var(--text-muted);">→</td>
-        <td style="padding:10px 12px; font-weight:600; color:var(--accent);">${escHtml(m.intersolName)}</td>
-        <td style="padding:10px 8px; text-align:center;">
-          <span style="background:${m.similarity>=80?'rgba(107,191,103,0.2);color:#6dbf67':'rgba(240,165,0,0.2);color:#f0a500'};
-            padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600;">
-            ${m.similarity}%
-          </span>
-        </td>
-        <td style="padding:10px 8px; text-align:center; white-space:nowrap;">
-          <button onclick="approveMatch(${i})" class="btn-match approve" title="אשר">✓</button>
-          <button onclick="rejectMatch(${i})" class="btn-match reject" title="דלג">✗</button>
-        </td>
-      </tr>
-    `).join('');
+    const groupsHtml = candidates.map((group, gi) => {
+      const optionsHtml = group.matches.map((m, mi) => `
+        <div class="ism-option" id="ism-opt-${gi}-${mi}" onclick="selectCandidate(${gi},${mi})"
+          style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;"
+          title="טוקנים: ${m.score.token}% | לוינשטיין: ${m.score.levenshtein}%${m.score.substring ? ' | מחרוזת-משנה' : ''}">
+          <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;" class="ism-radio"></div>
+          <div style="flex:1;font-weight:600;color:var(--accent);">${escHtml(m.intersolName)}</div>
+          ${scoreBadge(m.score.combined)}
+          <span style="font-size:11px;color:var(--text-muted);">T:${m.score.token}</span>
+        </div>
+      `).join('');
 
+      return `
+        <div id="ism-grp-${gi}" style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(34,38,58,0.5);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-weight:700;">${escHtml(group.mondayName)} <span style="font-size:12px;color:var(--text-muted);">${group.matches.length} אפשרויות</span></span>
+            <div id="ism-act-${gi}">
+              <button onclick="applyCandidate(${gi})" disabled class="btn-match approve" style="padding:4px 14px;border-radius:8px;font-size:13px;">אשר</button>
+              <button onclick="skipCandidate(${gi})" class="btn-match reject" style="padding:4px 14px;border-radius:8px;font-size:13px;">דלג</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">${optionsHtml}</div>
+        </div>`;
+    }).join('');
+
+    const totalMatches = candidates.reduce((s, c) => s + c.matches.length, 0);
     const modal = document.createElement('div');
     modal.id = 'matchModal';
     modal.innerHTML = `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:500;
         display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)closeMatchModal()">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;
-          padding:24px;max-width:700px;width:95%;max-height:80vh;overflow:auto;box-shadow:0 8px 48px rgba(0,0,0,0.4);">
+          padding:24px;max-width:750px;width:95%;max-height:80vh;overflow:auto;box-shadow:0 8px 48px rgba(0,0,0,0.4);">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-            <h3 style="font-size:17px;font-weight:700;">
-              ☀️ התאמות חכמות — ${matches.length} הצעות
-            </h3>
+            <h3 style="font-size:17px;font-weight:700;">התאמות חכמות — ${candidates.length} פרויקטים, ${totalMatches} הצעות</h3>
             <button onclick="closeMatchModal()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
           </div>
-          <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">
-            הפרויקטים הבאים לא נמצאו בהתאמה מדויקת. אשר או דלג על כל הצעה.
-          </p>
-          <table style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border);">
-                <th style="padding:8px 12px;font-size:12px;color:var(--text-muted);text-align:right;">Monday</th>
-                <th></th>
-                <th style="padding:8px 12px;font-size:12px;color:var(--text-muted);text-align:right;">INTERSOL</th>
-                <th style="padding:8px 8px;font-size:12px;color:var(--text-muted);text-align:center;">דמיון</th>
-                <th style="padding:8px 8px;font-size:12px;color:var(--text-muted);text-align:center;">פעולה</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+          <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">לכל פרויקט מוצגים כמה מועמדים מאינטרסול. בחר את המתאים ואשר, או דלג.</p>
+          ${groupsHtml}
           <div style="margin-top:16px;text-align:left;">
             <button onclick="closeMatchModal()" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border);
               background:transparent;color:var(--text-muted);font-family:inherit;cursor:pointer;">סגור</button>
           </div>
         </div>
       </div>`;
-
-    // Store matches data for approval
-    modal._matches = matches;
     document.body.appendChild(modal);
   }
 
-  async function approveMatch(idx) {
-    const modal = document.getElementById('matchModal');
-    const m = modal._matches[idx];
-    const row = document.getElementById(`match-row-${idx}`);
-    const btns = row.querySelectorAll('.btn-match');
+  function selectCandidate(gi, mi) {
+    _matchSelected[gi] = mi;
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    grp.querySelectorAll('.ism-option').forEach(el => { el.style.borderColor = 'transparent'; el.style.background = ''; el.querySelector('.ism-radio').innerHTML = ''; });
+    const opt = document.getElementById(`ism-opt-${gi}-${mi}`);
+    opt.style.borderColor = '#6dbf67';
+    opt.style.background = 'rgba(107,191,103,0.08)';
+    opt.querySelector('.ism-radio').innerHTML = '<div style="width:8px;height:8px;border-radius:50%;background:#6dbf67;"></div>';
+    opt.querySelector('.ism-radio').style.borderColor = '#6dbf67';
+    grp.querySelector('.btn-match.approve').disabled = false;
+  }
+
+  async function applyCandidate(gi) {
+    const mi = _matchSelected[gi];
+    if (mi < 0) return;
+    const group = _matchCandidates[gi];
+    const match = group.matches[mi];
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    const btns = grp.querySelectorAll('.btn-match');
     btns.forEach(b => b.disabled = true);
-    row.style.opacity = '0.5';
 
     try {
       const res = await fetch(`${WORKER_URL}/apply-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mondayId: m.mondayId, intersolFields: m.intersolFields }),
+        body: JSON.stringify({ mondayId: group.mondayId, intersolFields: match.intersolFields }),
       });
       const data = await res.json();
       if (data.success) {
-        row.style.background = 'rgba(107,191,103,0.1)';
-        row.style.opacity = '1';
-        btns.forEach(b => b.remove());
-        row.querySelector('td:last-child').innerHTML = '<span style="color:#6dbf67;font-weight:600;">✓ עודכן</span>';
-        showToast(`עודכן: ${m.mondayName}`);
+        grp.style.opacity = '0.5';
+        document.getElementById(`ism-act-${gi}`).innerHTML = '<span style="color:#6dbf67;font-weight:600;">✓ עודכן</span>';
+        showToast(`עודכן: ${group.mondayName}`);
+        updateSyncLine('pending', `${_matchCandidates.filter((_, i) => !document.getElementById('ism-act-' + i)?.textContent?.includes('עודכן') && !document.getElementById('ism-act-' + i)?.textContent?.includes('דילוג')).length} ממתינים`, false);
       } else {
-        row.style.opacity = '1';
         btns.forEach(b => b.disabled = false);
         showToast(`שגיאה: ${data.error}`);
       }
     } catch (e) {
-      row.style.opacity = '1';
       btns.forEach(b => b.disabled = false);
       showToast(`שגיאה: ${e.message}`);
     }
   }
 
-  function rejectMatch(idx) {
-    const row = document.getElementById(`match-row-${idx}`);
-    row.style.opacity = '0.3';
-    row.style.textDecoration = 'line-through';
-    row.querySelectorAll('.btn-match').forEach(b => b.remove());
-    row.querySelector('td:last-child').innerHTML = '<span style="color:var(--text-muted);">דילוג</span>';
+  function skipCandidate(gi) {
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    grp.style.opacity = '0.3';
+    document.getElementById(`ism-act-${gi}`).innerHTML = '<span style="color:var(--text-muted);">דילוג</span>';
   }
 
   function closeMatchModal() {
     document.getElementById('matchModal')?.remove();
-    loadTasks(); // Refresh dashboard
+    hideSyncStatus();
+    loadTasks();
   }
 
   function escHtml(s) {
@@ -1115,27 +1164,34 @@
 
   async function backgroundSync() {
     try {
+      showSyncStatus();
+      updateSyncLine('connect', 'סנכרון רקע — שולף נתונים...', false);
+
       const res = await fetch(`${WORKER_URL}/intersol-sync`, { method: 'POST' });
       const data = await res.json();
-      if (!data.success) return;
+      if (!data.success) { hideSyncStatus(); return; }
 
-      // Quiet toast only if something actually updated
-      if (data.updated > 0) {
-        showToast(`☀️ סנכרון רקע: ${data.matched} הותאמו, ${data.updated} עודכנו`);
-        // Refresh task data silently to pick up new column values
-        const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
-        if (taskRes.ok) {
-          allTasks = await taskRes.json();
-          renderFiltered();
-        }
+      updateSyncLine('connect', `${data.intersol_total} פרויקטים נסרקו`, true);
+      updateSyncLine('match', `${data.matched} הותאמו, ${data.updated} עודכנו`, true);
+
+      const dp = data.designPlans || {};
+      if (dp.uploaded > 0 || dp.skipped > 0) {
+        updateSyncLine('design', `תכניות הקמה: ${dp.uploaded} הועלו, ${dp.skipped} ללא שינוי`, true);
       }
 
-      // Show fuzzy match modal if suggestions exist
+      if (data.updated > 0) {
+        const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
+        if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+      }
+
       if (data.pendingMatches && data.pendingMatches.length > 0) {
+        updateSyncLine('pending', `${data.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
         showMatchModal(data.pendingMatches);
+      } else {
+        setTimeout(hideSyncStatus, 4000);
       }
     } catch {
-      // Silent fail — background sync should never bother the user
+      hideSyncStatus();
     }
   }
 

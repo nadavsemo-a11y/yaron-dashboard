@@ -2259,6 +2259,29 @@
     setTimeout(() => t.classList.remove('show'), 3000);
   }
 
+  // ── INTERSOL Sync Status Widget ──
+  function showSyncStatus() {
+    if (document.getElementById('syncStatus')) return document.getElementById('syncStatus');
+    const el = document.createElement('div');
+    el.id = 'syncStatus';
+    el.style.cssText = 'position:fixed;bottom:20px;left:20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;z-index:400;box-shadow:0 4px 24px rgba(0,0,0,0.3);min-width:260px;transition:opacity 0.3s;';
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:6px;">☀️ סנכרון INTERSOL</div><div id="syncLines"></div>';
+    document.body.appendChild(el);
+    return el;
+  }
+  function updateSyncLine(key, text, done) {
+    const container = document.getElementById('syncLines');
+    if (!container) return;
+    let line = document.getElementById(`sync-${key}`);
+    if (!line) { line = document.createElement('div'); line.id = `sync-${key}`; line.style.cssText = 'padding:2px 0;color:var(--text-muted);'; container.appendChild(line); }
+    line.innerHTML = `${done ? '✓' : '<span style="display:inline-block;animation:spin 0.8s linear infinite;">⟳</span>'} ${text}`;
+    if (done) line.style.color = '#6dbf67';
+  }
+  function hideSyncStatus() {
+    const el = document.getElementById('syncStatus');
+    if (el) { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }
+  }
+
   // ── INTERSOL Sync ──
   async function scanIntersol() {
     const btn = document.getElementById('intersolBtn');
@@ -2266,44 +2289,179 @@
     btn.disabled = true;
     icon.style.animation = 'spin 0.8s linear infinite';
 
+    showSyncStatus();
+    updateSyncLine('connect', 'מתחבר ל-INTERSOL...', false);
+
     try {
-      // Phase 1: Technical data sync
-      showToast('☀️ שלב 1/2 — סנכרון נתונים טכניים...');
+      // Phase 1: Data + matching + design plans
+      updateSyncLine('connect', 'שולף נתונים ומתאים פרויקטים...', false);
       const res1 = await fetch(`${WORKER_URL}/intersol-sync`, { method: 'POST' });
       const data1 = await res1.json();
-      if (!data1.success) { showToast(`שגיאה: ${data1.error}`); return; }
-      showToast(`☀️ נתונים טכניים: ${data1.updated} עודכנו. מעלה תמונות...`);
+      if (!data1.success) { updateSyncLine('connect', `שגיאה: ${data1.error}`, true); setTimeout(hideSyncStatus, 5000); return; }
+
+      updateSyncLine('connect', `${data1.intersol_total} פרויקטים נסרקו`, true);
+      updateSyncLine('match', `${data1.matched} הותאמו אוטומטית, ${data1.updated} עודכנו`, true);
+
+      const dp = data1.designPlans || {};
+      if (dp.uploaded > 0 || dp.skipped > 0) {
+        updateSyncLine('design', `תכניות הקמה: ${dp.uploaded} הועלו, ${dp.skipped} ללא שינוי`, true);
+      }
 
       // Phase 2: Media sync (images + short links) in chunks
-      let offset = 0;
-      let totalLinks = 0;
-      let totalImages = 0;
-      let totalMatches = 0;
-      let hasMore = true;
-
+      let offset = 0, totalLinks = 0, totalImages = 0, totalMatches = 0, hasMore = true;
       while (hasMore) {
-        showToast(`☀️ שלב 2/2 — מדיה: ${offset}/${totalMatches || '?'}...`);
+        updateSyncLine('media', `מדיה: ${offset}/${totalMatches || '?'}...`, false);
         const res2 = await fetch(`${WORKER_URL}/intersol-media-sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ offset }),
         });
         const data2 = await res2.json();
-        if (!data2.success) { showToast(`שגיאה במדיה: ${data2.error}`); break; }
+        if (!data2.success) { updateSyncLine('media', `שגיאה: ${data2.error}`, true); break; }
         totalMatches = data2.total_matches;
         totalLinks += data2.links_updated;
         totalImages += data2.images_uploaded;
         hasMore = data2.has_more;
         offset = data2.next_offset || 0;
       }
+      updateSyncLine('media', `${totalLinks} קישורים, ${totalImages} תמונות`, true);
 
-      showToast(`☀️ הושלם! ${data1.updated} נתונים, ${totalLinks} קישורים, ${totalImages} תמונות`);
+      // Show multi-candidate match modal if needed
+      if (data1.pendingMatches && data1.pendingMatches.length > 0) {
+        updateSyncLine('pending', `${data1.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
+        showMatchModal(data1.pendingMatches);
+      } else {
+        setTimeout(hideSyncStatus, 5000);
+      }
+
+      // Refresh dashboard
+      const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
+      if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+
     } catch (e) {
-      showToast(`שגיאת חיבור: ${e.message}`);
+      updateSyncLine('connect', `שגיאת חיבור: ${e.message}`, true);
+      setTimeout(hideSyncStatus, 5000);
     } finally {
       btn.disabled = false;
       icon.style.animation = '';
     }
+  }
+
+  // ── Multi-Candidate Match Modal ──
+  let _matchCandidates = [];
+  let _matchSelected = [];
+
+  function scoreBadge(score) {
+    const bg = score >= 80 ? 'rgba(107,191,103,0.2)' : score >= 60 ? 'rgba(240,165,0,0.2)' : 'rgba(224,92,92,0.15)';
+    const fg = score >= 80 ? '#6dbf67' : score >= 60 ? '#f0a500' : '#e05c5c';
+    return `<span style="background:${bg};color:${fg};padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600;">${score}%</span>`;
+  }
+
+  function showMatchModal(candidates) {
+    document.getElementById('matchModal')?.remove();
+    _matchCandidates = candidates;
+    _matchSelected = new Array(candidates.length).fill(-1);
+
+    const groupsHtml = candidates.map((group, gi) => {
+      const optionsHtml = group.matches.map((m, mi) => `
+        <div class="ism-option" id="ism-opt-${gi}-${mi}" onclick="selectCandidate(${gi},${mi})"
+          style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;"
+          title="טוקנים: ${m.score.token}% | לוינשטיין: ${m.score.levenshtein}%${m.score.substring ? ' | מחרוזת-משנה' : ''}">
+          <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;" class="ism-radio"></div>
+          <div style="flex:1;font-weight:600;color:var(--accent);">${escHtml(m.intersolName)}</div>
+          ${scoreBadge(m.score.combined)}
+          <span style="font-size:11px;color:var(--text-muted);">T:${m.score.token}</span>
+        </div>
+      `).join('');
+
+      return `
+        <div id="ism-grp-${gi}" style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(34,38,58,0.5);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-weight:700;">${escHtml(group.mondayName)} <span style="font-size:12px;color:var(--text-muted);">${group.matches.length} אפשרויות</span></span>
+            <div id="ism-act-${gi}">
+              <button onclick="applyCandidate(${gi})" disabled class="btn-match approve" style="padding:4px 14px;border-radius:8px;font-size:13px;">אשר</button>
+              <button onclick="skipCandidate(${gi})" class="btn-match reject" style="padding:4px 14px;border-radius:8px;font-size:13px;">דלג</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">${optionsHtml}</div>
+        </div>`;
+    }).join('');
+
+    const totalMatches = candidates.reduce((s, c) => s + c.matches.length, 0);
+    const modal = document.createElement('div');
+    modal.id = 'matchModal';
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:500;
+        display:flex;align-items:center;justify-content:center;" onclick="if(event.target===this)closeMatchModal()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;
+          padding:24px;max-width:750px;width:95%;max-height:80vh;overflow:auto;box-shadow:0 8px 48px rgba(0,0,0,0.4);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="font-size:17px;font-weight:700;">התאמות חכמות — ${candidates.length} פרויקטים, ${totalMatches} הצעות</h3>
+            <button onclick="closeMatchModal()" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">✕</button>
+          </div>
+          <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px;">לכל פרויקט מוצגים כמה מועמדים מאינטרסול. בחר את המתאים ואשר, או דלג.</p>
+          ${groupsHtml}
+          <div style="margin-top:16px;text-align:left;">
+            <button onclick="closeMatchModal()" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border);
+              background:transparent;color:var(--text-muted);font-family:inherit;cursor:pointer;">סגור</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  function selectCandidate(gi, mi) {
+    _matchSelected[gi] = mi;
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    grp.querySelectorAll('.ism-option').forEach(el => { el.style.borderColor = 'transparent'; el.style.background = ''; el.querySelector('.ism-radio').innerHTML = ''; el.querySelector('.ism-radio').style.borderColor = ''; });
+    const opt = document.getElementById(`ism-opt-${gi}-${mi}`);
+    opt.style.borderColor = '#6dbf67';
+    opt.style.background = 'rgba(107,191,103,0.08)';
+    opt.querySelector('.ism-radio').innerHTML = '<div style="width:8px;height:8px;border-radius:50%;background:#6dbf67;"></div>';
+    opt.querySelector('.ism-radio').style.borderColor = '#6dbf67';
+    grp.querySelector('.btn-match.approve').disabled = false;
+  }
+
+  async function applyCandidate(gi) {
+    const mi = _matchSelected[gi];
+    if (mi < 0) return;
+    const group = _matchCandidates[gi];
+    const match = group.matches[mi];
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    const btns = grp.querySelectorAll('.btn-match');
+    btns.forEach(b => b.disabled = true);
+
+    try {
+      const res = await fetch(`${WORKER_URL}/apply-match`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mondayId: group.mondayId, intersolFields: match.intersolFields }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        grp.style.opacity = '0.5';
+        document.getElementById(`ism-act-${gi}`).innerHTML = '<span style="color:#6dbf67;font-weight:600;">✓ עודכן</span>';
+        showToast(`עודכן: ${group.mondayName}`);
+      } else {
+        btns.forEach(b => b.disabled = false);
+        showToast(`שגיאה: ${data.error}`);
+      }
+    } catch (e) {
+      btns.forEach(b => b.disabled = false);
+      showToast(`שגיאה: ${e.message}`);
+    }
+  }
+
+  function skipCandidate(gi) {
+    const grp = document.getElementById(`ism-grp-${gi}`);
+    grp.style.opacity = '0.3';
+    document.getElementById(`ism-act-${gi}`).innerHTML = '<span style="color:var(--text-muted);">דילוג</span>';
+  }
+
+  function closeMatchModal() {
+    document.getElementById('matchModal')?.remove();
+    hideSyncStatus();
+    loadTasks();
   }
 
   function escHtml(s) {
@@ -2625,7 +2783,42 @@
 
   loadTasks().then(() => {
     enableIntroButton();
+    // Auto INTERSOL sync on load — background, non-blocking
+    backgroundSync();
   });
+
+  async function backgroundSync() {
+    try {
+      showSyncStatus();
+      updateSyncLine('connect', 'סנכרון רקע — שולף נתונים...', false);
+
+      const res = await fetch(`${WORKER_URL}/intersol-sync`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) { hideSyncStatus(); return; }
+
+      updateSyncLine('connect', `${data.intersol_total} פרויקטים נסרקו`, true);
+      updateSyncLine('match', `${data.matched} הותאמו, ${data.updated} עודכנו`, true);
+
+      const dp = data.designPlans || {};
+      if (dp.uploaded > 0 || dp.skipped > 0) {
+        updateSyncLine('design', `תכניות הקמה: ${dp.uploaded} הועלו, ${dp.skipped} ללא שינוי`, true);
+      }
+
+      if (data.updated > 0) {
+        const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
+        if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+      }
+
+      if (data.pendingMatches && data.pendingMatches.length > 0) {
+        updateSyncLine('pending', `${data.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
+        showMatchModal(data.pendingMatches);
+      } else {
+        setTimeout(hideSyncStatus, 4000);
+      }
+    } catch {
+      hideSyncStatus();
+    }
+  }
 
 </script>
 </body>

@@ -854,11 +854,13 @@ export default {
       }
 
       // POST /intersol-sync - Scan INTERSOL and update Monday.com
+      // Multi-candidate matching + design plan PDF sync
       if (url.pathname === '/intersol-sync' && request.method === 'POST') {
         const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
         const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
         const INTERSOL_USER = 'SEMO AGS';
         const INTERSOL_PASS = 'ebFgSoP3Na!(XLX*1Alj4rWB';
+        const DESIGN_PLAN_COL = 'file_mm1rdfhs';
 
         const COLUMN_MAP = {
           solar_module: 'text_mm1besx6',
@@ -871,26 +873,88 @@ export default {
 
         const KNOWN_BAD = new Set(['שוקי -סנדרין|שוקי חזן', 'יקיר יהב|חיים יהב']);
 
+        // ── Matching utilities (inline — same as intersol-sync-module.js) ──
+
+        const normalize = (s) => String(s).replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
+
+        const NOISE_TOKENS = new Set(['בהמתנה', 'ל', 'לט', 'ט', 'ממתין', 'הושלם', 'בוטל', 'פעיל', 'PV', 'PV1', 'PV2', 'PV3', 'PV4']);
+
+        function tokenize(s) {
+          return String(s).replace('ג׳', 'ג').replace(/[()[\]{}\-–—,.:;'"׳\/\\]/g, ' ')
+            .split(/\s+/).map(t => t.trim()).filter(t => t.length > 0 && !NOISE_TOKENS.has(t));
+        }
+
+        function tokenOverlap(tokensA, tokensB) {
+          if (!tokensA.length || !tokensB.length) return 0;
+          const normA = tokensA.map(normalize), normB = tokensB.map(normalize);
+          let matches = 0;
+          for (const ta of normA) {
+            if (normB.includes(ta)) { matches++; continue; }
+            for (const tb of normB) { if (tb.includes(ta) || ta.includes(tb)) { matches += 0.5; break; } }
+          }
+          return matches / Math.min(normA.length, normB.length);
+        }
+
+        function levenshtein(a, b) {
+          if (!a || !b) return 0;
+          const m = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+          for (let j = 0; j <= b.length; j++) m[0][j] = j;
+          for (let i = 1; i <= a.length; i++)
+            for (let j = 1; j <= b.length; j++)
+              m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+          return 1 - m[a.length][b.length] / Math.max(a.length, b.length);
+        }
+
+        function combinedScore(mondayName, intersolName) {
+          const mNorm = normalize(mondayName), iNorm = normalize(intersolName);
+          const tokenScore = tokenOverlap(tokenize(mondayName), tokenize(intersolName));
+          const levScore = levenshtein(mNorm, iNorm);
+          const isSubstr = mNorm.includes(iNorm) || iNorm.includes(mNorm);
+          return {
+            token: Math.round(tokenScore * 100),
+            levenshtein: Math.round(levScore * 100),
+            substring: isSubstr,
+            combined: Math.round((tokenScore * 0.55 + levScore * 0.25 + (isSubstr ? 0.20 : 0)) * 100),
+          };
+        }
+
+        function extractFields(proj) {
+          const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, project_name: proj.title };
+          for (const a of ((proj.projectInfo || {}).assets || [])) {
+            const v = a.value || '';
+            if (typeof v === 'object') { Object.assign(result, { ...v.project_name && { project_name: v.project_name }, ...v.permit_limit && { permit_limit: v.permit_limit }, ...v.connection_size && { connection_size: v.connection_size }, ...v.solar_module && { solar_module: v.solar_module }, ...v.solar_inverter && { solar_inverter: v.solar_inverter } }); }
+          }
+          return result;
+        }
+
+        function getDesignPlanUrls(proj) {
+          const dp = proj.designProgram;
+          if (!dp || !dp.assets || !dp.assets.length) return [];
+          const assets = dp.assets.filter(a => typeof a.value === 'string' && a.value.startsWith('http'));
+          if (!assets.length) return [];
+          if (assets.length === 1) return [{ label: assets[0].label, url: assets[0].value }];
+          const versionPattern = /^תכנון מפורט\s*(\d*)$/;
+          const allVersioned = assets.every(a => versionPattern.test(a.label.trim()));
+          if (allVersioned) {
+            let best = assets[0], bestNum = 1;
+            for (const a of assets) { const m = a.label.trim().match(versionPattern); const n = m[1] ? parseInt(m[1]) : 1; if (n > bestNum) { bestNum = n; best = a; } }
+            return [{ label: best.label, url: best.value }];
+          }
+          return assets.map(a => ({ label: a.label, url: a.value }));
+        }
+
         try {
           // Step 1: Login to INTERSOL
-          const tokenRes = await fetch(INTERSOL_TOKEN_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }),
-          });
+          const tokenRes = await fetch(INTERSOL_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }) });
           if (!tokenRes.ok) throw new Error('INTERSOL login failed');
-          const tokenData = await tokenRes.json();
-          const token = tokenData.token;
+          const token = (await tokenRes.json()).token;
 
-          // Step 2: Fetch all projects
-          const projRes = await fetch(INTERSOL_PROJECTS_URL, {
-            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
-          });
+          // Step 2: Fetch all INTERSOL projects
+          const projRes = await fetch(INTERSOL_PROJECTS_URL, { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } });
           if (!projRes.ok) throw new Error('INTERSOL fetch failed');
-          const projData = await projRes.json();
-          const intersolProjects = projData.list || projData;
+          const intersolProjects = (await projRes.json()).list || [];
 
-          // Step 3: Fetch Monday projects
+          // Step 3: Fetch Monday items
           let mondayItems = [];
           let cursor = null;
           let hasMore = true;
@@ -898,11 +962,7 @@ export default {
             const q = cursor
               ? `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500, cursor: "${cursor}") { cursor items { id name } } } }`
               : `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500) { cursor items { id name } } } }`;
-            const mRes = await fetch('https://api.monday.com/v2', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
-              body: JSON.stringify({ query: q }),
-            });
+            const mRes = await fetch('https://api.monday.com/v2', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: JSON.stringify({ query: q }) });
             const mData = await mRes.json();
             const page = mData.data.boards[0].items_page;
             mondayItems = mondayItems.concat(page.items);
@@ -910,143 +970,111 @@ export default {
             hasMore = !!cursor;
           }
 
-          // Step 4: Match and update
-          const normalize = (s) => s.replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
+          // Step 4: Multi-candidate matching
+          const intersolEntries = intersolProjects.map(proj => {
+            const fields = extractFields(proj);
+            return { proj, fields, name: fields.project_name || proj.title || '' };
+          });
 
-          // Extract INTERSOL fields helper
-          function extractFields(proj) {
-            const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, project_name: proj.title };
-            const assets = (proj.projectInfo || {}).assets || [];
-            for (const a of assets) {
-              const label = a.label || '';
-              const value = a.value || '';
-              if (typeof value === 'object') {
-                if (value.project_name) result.project_name = value.project_name;
-                if (value.permit_limit) result.permit_limit = value.permit_limit;
-                if (value.connection_size) result.connection_size = value.connection_size;
-                if (value.solar_module) result.solar_module = value.solar_module;
-                if (value.solar_inverter) result.solar_inverter = value.solar_inverter;
-              }
-            }
-            return result;
-          }
+          const autoMatches = [];
+          const candidates = [];
+          const skipRe = /תבנית|טסט|בדיקה|ניסויים/;
 
-          // Levenshtein distance for fuzzy matching
-          function levenshtein(a, b) {
-            const m = Array.from({ length: a.length + 1 }, (_, i) => [i]);
-            for (let j = 0; j <= b.length; j++) m[0][j] = j;
-            for (let i = 1; i <= a.length; i++)
-              for (let j = 1; j <= b.length; j++)
-                m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
-            return 1 - m[a.length][b.length] / Math.max(a.length, b.length);
-          }
-
-          let updated = 0;
-          let matched = 0;
-          const errors = [];
-          const batchParts = [];
-          const matchedMondayIds = new Set();
-          const matchedIntersolNorms = new Set();
-
-          // Step 4a: Exact + substring matching (high confidence)
           for (const mItem of mondayItems) {
-            const mNorm = normalize(mItem.name);
-            let bestMatch = null;
-            let bestScore = 0;
-
-            for (const iProj of intersolProjects) {
-              const iFields = extractFields(iProj);
-              const iName = iFields.project_name || iProj.title || '';
-              const iNorm = normalize(iName);
-
-              if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
-
-              if (mNorm === iNorm) { bestMatch = { proj: iProj, fields: iFields, name: iName, norm: iNorm }; break; }
-              if (mNorm.includes(iNorm) || iNorm.includes(mNorm)) {
-                const score = Math.min(mNorm.length, iNorm.length) / Math.max(mNorm.length, iNorm.length) * 90;
-                if (score > bestScore) { bestMatch = { proj: iProj, fields: iFields, name: iName, norm: iNorm }; bestScore = score; }
-              }
+            if (skipRe.test(mItem.name)) continue;
+            const scored = [];
+            for (const entry of intersolEntries) {
+              if (KNOWN_BAD.has(`${mItem.name}|${entry.name}`)) continue;
+              const score = combinedScore(mItem.name, entry.name);
+              if (score.combined >= 40) scored.push({ ...entry, score });
             }
+            if (!scored.length) continue;
+            scored.sort((a, b) => b.score.combined - a.score.combined);
+            const top = scored.slice(0, 5);
+            const topScore = top[0].score.combined;
+            const secondScore = top.length > 1 ? top[1].score.combined : 0;
+            if (topScore >= 85 && (top.length === 1 || topScore - secondScore >= 20)) {
+              autoMatches.push({ mondayId: mItem.id, mondayName: mItem.name, intersolName: top[0].name, intersolFields: top[0].fields, intersolProj: top[0].proj, score: top[0].score });
+            } else {
+              candidates.push({ mondayId: mItem.id, mondayName: mItem.name, matches: top.map(t => ({ intersolName: t.name, intersolFields: t.fields, score: t.score })) });
+            }
+          }
 
-            if (!bestMatch) continue;
-            matched++;
-            matchedMondayIds.add(mItem.id);
-            matchedIntersolNorms.add(bestMatch.norm);
-
-            const f = bestMatch.fields;
+          // Step 5: Update Monday columns for auto matches
+          let updated = 0;
+          const errors = [];
+          const batchParts = autoMatches.map(m => {
             const colValues = {};
+            const f = m.intersolFields;
             if (f.solar_module) colValues[COLUMN_MAP.solar_module] = f.solar_module;
             if (f.solar_inverter) colValues[COLUMN_MAP.solar_inverter] = f.solar_inverter;
             if (f.kwp) colValues[COLUMN_MAP.max_dc] = String(f.kwp);
             if (f.kwp) colValues[COLUMN_MAP.kwp] = String(f.kwp);
             if (f.connection_size) colValues[COLUMN_MAP.connection_size] = f.connection_size;
             if (f.permit_limit) colValues[COLUMN_MAP.ac_power] = String(f.permit_limit);
+            return { id: m.mondayId, name: m.mondayName, colValues };
+          }).filter(b => Object.keys(b.colValues).length > 0);
 
-            if (Object.keys(colValues).length === 0) continue;
-            batchParts.push({ id: mItem.id, name: mItem.name, colValues });
-          }
-
-          // Step 4b: Fuzzy matching for unmatched items (pending user approval)
-          const pendingMatches = [];
-          const FUZZY_THRESHOLD = 0.55;
-          const unmatchedMonday = mondayItems.filter(m => !matchedMondayIds.has(m.id));
-
-          for (const mItem of unmatchedMonday) {
-            const mNorm = normalize(mItem.name);
-            // Skip test/template items
-            if (/תבנית|טסט|בדיקה|ניסויים/.test(mItem.name)) continue;
-
-            let bestSim = 0;
-            let bestCandidate = null;
-
-            for (const iProj of intersolProjects) {
-              const iFields = extractFields(iProj);
-              const iName = iFields.project_name || iProj.title || '';
-              const iNorm = normalize(iName);
-
-              if (KNOWN_BAD.has(`${mItem.name}|${iName}`)) continue;
-              if (matchedIntersolNorms.has(iNorm)) continue; // already matched
-
-              const sim = levenshtein(mNorm, iNorm);
-              if (sim > bestSim) {
-                bestSim = sim;
-                bestCandidate = { name: iName, fields: iFields, norm: iNorm };
-              }
-            }
-
-            if (bestCandidate && bestSim >= FUZZY_THRESHOLD) {
-              pendingMatches.push({
-                mondayId: mItem.id,
-                mondayName: mItem.name,
-                intersolName: bestCandidate.name,
-                similarity: Math.round(bestSim * 100),
-                intersolFields: bestCandidate.fields,
-              });
-            }
-          }
-
-          // Execute updates in batches of 25 (Monday supports up to 50)
           const BATCH_SIZE = 25;
           for (let i = 0; i < batchParts.length; i += BATCH_SIZE) {
             const batch = batchParts.slice(i, i + BATCH_SIZE);
             const mutations = batch.map((b, idx) =>
               `a${idx}: change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${b.id}, column_values: ${JSON.stringify(JSON.stringify(b.colValues))}) { id }`
             ).join('\n');
-
             try {
-              const uRes = await fetch('https://api.monday.com/v2', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
-                body: JSON.stringify({ query: `mutation { ${mutations} }` }),
-              });
+              const uRes = await fetch('https://api.monday.com/v2', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: JSON.stringify({ query: `mutation { ${mutations} }` }) });
               const uData = await uRes.json();
-              if (uData.errors) {
-                batch.forEach(b => errors.push({ project: b.name, error: uData.errors }));
-              } else {
-                updated += batch.length;
-              }
+              if (uData.errors) batch.forEach(b => errors.push({ project: b.name, error: uData.errors }));
+              else updated += batch.length;
             } catch (e) {
               batch.forEach(b => errors.push({ project: b.name, error: e.message }));
+            }
+          }
+
+          // Step 6: Sync design plan PDFs (only changed files, KV cache)
+          let designUploaded = 0, designSkipped = 0;
+          const designErrors = [];
+
+          for (const m of autoMatches) {
+            const planUrls = getDesignPlanUrls(m.intersolProj);
+            if (!planUrls.length) { designSkipped++; continue; }
+
+            const cacheKey = `design_plan:${m.mondayId}`;
+            const cached = await env.TASKS_CACHE.get(cacheKey);
+            const cachedUrls = cached ? JSON.parse(cached) : [];
+            const currentUrls = planUrls.map(p => p.url).sort();
+            const cachedSorted = [...cachedUrls].sort();
+
+            if (currentUrls.length === cachedSorted.length && currentUrls.every((u, i) => u === cachedSorted[i])) {
+              designSkipped++;
+              continue;
+            }
+
+            // Download + upload each PDF
+            let allOk = true;
+            for (const plan of planUrls) {
+              try {
+                const pdfRes = await fetch(plan.url);
+                if (!pdfRes.ok) { designErrors.push({ project: m.mondayName, error: `PDF download failed: ${pdfRes.status}` }); allOk = false; break; }
+                const pdfBlob = await pdfRes.blob();
+
+                const query = `mutation ($file: File!) { add_file_to_column(item_id: ${m.mondayId}, column_id: "${DESIGN_PLAN_COL}", file: $file) { id } }`;
+                const form = new FormData();
+                form.append('query', query);
+                form.append('map', JSON.stringify({ image: 'variables.file' }));
+                form.append('image', new File([pdfBlob], `design_plan_${m.mondayId}.pdf`, { type: 'application/pdf' }));
+
+                const upRes = await fetch('https://api.monday.com/v2/file', { method: 'POST', headers: { 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: form });
+                const upData = await upRes.json();
+                if (upData.errors) { designErrors.push({ project: m.mondayName, error: upData.errors }); allOk = false; break; }
+              } catch (e) {
+                designErrors.push({ project: m.mondayName, error: e.message }); allOk = false; break;
+              }
+            }
+
+            if (allOk) {
+              await env.TASKS_CACHE.put(cacheKey, JSON.stringify(currentUrls));
+              designUploaded++;
             }
           }
 
@@ -1054,10 +1082,11 @@ export default {
             success: true,
             intersol_total: intersolProjects.length,
             monday_total: mondayItems.length,
-            matched,
+            matched: autoMatches.length,
             updated,
+            designPlans: { uploaded: designUploaded, skipped: designSkipped, errors: designErrors.length > 0 ? designErrors : undefined },
             errors: errors.length > 0 ? errors : undefined,
-            pendingMatches: pendingMatches.length > 0 ? pendingMatches : undefined,
+            pendingMatches: candidates.length > 0 ? candidates : undefined,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
