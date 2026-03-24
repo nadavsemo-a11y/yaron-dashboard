@@ -1084,6 +1084,17 @@ export default {
       }
 
       // ── Layer C: Feedback Store ──
+      async function amRecordFeedbackBatch(kv, events) {
+        if (!kv || !events.length) return;
+        const ts = new Date().toISOString();
+        const fullEvents = events.map(e => ({ timestamp: ts, ...e }));
+        let log = [];
+        try { const raw = await kv.get('feedback:log'); if (raw) log = JSON.parse(raw); } catch {}
+        log.push(...fullEvents);
+        if (log.length > 500) log = log.slice(log.length - 500);
+        await kv.put('feedback:log', JSON.stringify(log));
+      }
+
       async function amRecordFeedback(kv, event) {
         if (!kv) return;
         const full = { timestamp: event.timestamp || Date.now(), mondayId: event.mondayId, mondayName: event.mondayName || '', intersolName: event.intersolName || '', decision: event.decision, score: event.score || 0, rank: event.rank || 0, candidateCount: event.candidateCount || 0, marginFromNext: event.marginFromNext || 0, features: event.features || {}, sharedTokens: event.sharedTokens || [], mondayOnlyTokens: event.mondayOnlyTokens || [], intersolOnlyTokens: event.intersolOnlyTokens || [] };
@@ -1334,15 +1345,14 @@ export default {
             entityClusters,
           });
 
-          // Record auto-match feedback events
-          for (const m of autoMatches) {
-            await amRecordFeedback(env.TASKS_CACHE, {
-              mondayId: m.mondayId, mondayName: m.mondayName, intersolName: m.intersolName,
-              decision: 'auto', score: m.score.combined, rank: m.rank, candidateCount: m.candidateCount,
-              marginFromNext: m.marginFromNext, features: m.features,
-              sharedTokens: (m.features || {}).sharedTokens, mondayOnlyTokens: (m.features || {}).mondayOnlyTokens, intersolOnlyTokens: (m.features || {}).intersolOnlyTokens,
-            });
-          }
+          // Record auto-match feedback events (batched — single KV write)
+          const autoFeedbackEvents = autoMatches.map(m => ({
+            mondayId: m.mondayId, mondayName: m.mondayName, intersolName: m.intersolName,
+            decision: 'auto', score: m.score.combined, rank: m.rank || 1, candidateCount: m.candidateCount || 1,
+            marginFromNext: m.marginFromNext || 0, features: m.features || {},
+            sharedTokens: (m.features || {}).sharedTokens || [], mondayOnlyTokens: (m.features || {}).mondayOnlyTokens || [], intersolOnlyTokens: (m.features || {}).intersolOnlyTokens || [],
+          }));
+          try { await amRecordFeedbackBatch(env.TASKS_CACHE, autoFeedbackEvents); } catch {}
 
           // Step 5: Update Monday columns for auto matches
           let updated = 0;
