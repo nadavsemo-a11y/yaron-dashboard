@@ -853,8 +853,424 @@ export default {
         }
       }
 
-      // POST /intersol-sync - Scan INTERSOL and update Monday.com
-      // Multi-candidate matching + design plan PDF sync
+      // ══════════════════════════════════════════════════════════════════
+      // ADAPTIVE MATCHER — inlined from adaptive-matcher.js (canonical source)
+      // ══════════════════════════════════════════════════════════════════
+
+      // ── Default Config ──
+      const AM_DEFAULT_CONFIG = {
+        weights: { coreTokenOverlap: 0.25, weightedJaccard: 0.15, subsetScore: 0.10, tokenSortSimilarity: 0.15, rawEditSimilarity: 0.10, technicalAgreement: 0.05, substringBoost: 0.10 },
+        penalties: { descriptorConflict: 0.15, numericConflict: 0.10 },
+        boosts: { confirmedEntityBoost: 0.10 },
+        thresholds: { auto: 85, autoGap: 20, candidate: 40, maxCandidates: 5 },
+        noiseTokens: ['בהמתנה', 'ל', 'לט', 'ט', 'ממתין', 'הושלם', 'בוטל', 'פעיל', 'PV', 'PV1', 'PV2', 'PV3', 'PV4'],
+        descriptorTokens: ['חדש', 'ישן', 'גג', 'קרקע', 'שדרוג', 'תוספת', 'מטבח', 'ספא', 'מלון'],
+        conflictPairs: [['חדש','ישן'], ['גג','קרקע'], ['PV1','PV2'], ['PV2','PV3'], ['PV1','PV3']],
+        mode: 'assisted',
+      };
+
+      // ── Layer A: Base Representation ──
+      function amNormalize(s) { return String(s).replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace(/ג׳/g, 'ג'); }
+
+      function amTokenize(s, cfg) {
+        const noiseSet = new Set((cfg || AM_DEFAULT_CONFIG).noiseTokens);
+        return String(s).replace(/ג׳/g, 'ג').replace(/[()[\]{}\-–—,.:;'"׳\/\\]/g, ' ')
+          .split(/\s+/).map(t => t.trim()).filter(t => t.length > 0 && !noiseSet.has(t));
+      }
+
+      function amClassifyToken(token, allNames, cfg) {
+        const c = cfg || AM_DEFAULT_CONFIG;
+        if (new Set(c.noiseTokens).has(token)) return 'noise';
+        if (new Set(c.descriptorTokens).has(token)) return 'descriptor';
+        if (/^\d+([.,]\d+)?$/.test(token) || /^[\d.]+kw[ph]?$/i.test(token)) return 'technical';
+        if (allNames && allNames.length > 0) {
+          const norm = amNormalize(token);
+          let count = 0;
+          for (const n of allNames) { if (amNormalize(n).includes(norm)) count++; }
+          if (count / allNames.length < 0.10) return 'identity';
+        }
+        return 'identity';
+      }
+
+      function amDocFrequency(allNames, cfg) {
+        const freq = new Map();
+        for (const name of allNames) {
+          const tokens = amTokenize(name, cfg);
+          const seen = new Set();
+          for (const t of tokens) { const n = amNormalize(t); if (!seen.has(n)) { seen.add(n); freq.set(n, (freq.get(n) || 0) + 1); } }
+        }
+        return freq;
+      }
+
+      function amBuildRep(name, allNames, cfg) {
+        const c = cfg || AM_DEFAULT_CONFIG;
+        const tokens = amTokenize(name, c);
+        const tokenClasses = {}, descriptors = [], technicalMarkers = [];
+        for (const t of tokens) {
+          const cls = amClassifyToken(t, allNames, c);
+          tokenClasses[t] = cls;
+          if (cls === 'descriptor') descriptors.push(t);
+          if (cls === 'technical') technicalMarkers.push(t);
+        }
+        return { original: name, normalized: amNormalize(name), tokens, tokenClasses, tokenSorted: [...tokens].sort().join(' '), descriptors, technicalMarkers };
+      }
+
+      // ── Layer B: Candidate Ranking ──
+      function amLevenshtein(a, b) {
+        if (!a || !b) return 0;
+        if (a === b) return 1;
+        const la = a.length, lb = b.length;
+        const m = Array.from({ length: la + 1 }, (_, i) => [i]);
+        for (let j = 0; j <= lb; j++) m[0][j] = j;
+        for (let i = 1; i <= la; i++)
+          for (let j = 1; j <= lb; j++)
+            m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+        return 1 - m[la][lb] / Math.max(la, lb);
+      }
+
+      function amTokenOverlap(tokensA, tokensB) {
+        if (!tokensA.length || !tokensB.length) return 0;
+        const nA = tokensA.map(amNormalize), nB = tokensB.map(amNormalize);
+        let matches = 0;
+        for (const ta of nA) {
+          if (nB.includes(ta)) { matches++; continue; }
+          for (const tb of nB) { if (tb.includes(ta) || ta.includes(tb)) { matches += 0.5; break; } }
+        }
+        return matches / Math.min(nA.length, nB.length);
+      }
+
+      function amWeightedJaccard(rA, rB, docFreq, totalDocs) {
+        const setA = new Set(rA.tokens.map(amNormalize)), setB = new Set(rB.tokens.map(amNormalize));
+        const union = new Set([...setA, ...setB]);
+        if (!union.size) return 0;
+        let interW = 0, unionW = 0;
+        for (const t of union) {
+          const w = Math.log(1 + (totalDocs || 1) / (docFreq ? (docFreq.get(t) || 1) : 1));
+          unionW += w;
+          if (setA.has(t) && setB.has(t)) interW += w;
+        }
+        return unionW > 0 ? interW / unionW : 0;
+      }
+
+      function amSubsetScore(rA, rB) {
+        const nA = rA.tokens.map(amNormalize), nB = rB.tokens.map(amNormalize);
+        if (!nA.length || !nB.length) return 0;
+        let aInB = 0, bInA = 0;
+        for (const t of nA) { if (nB.includes(t)) aInB++; }
+        for (const t of nB) { if (nA.includes(t)) bInA++; }
+        return Math.max(aInB / nA.length, bInA / nB.length);
+      }
+
+      function amTokenSortSim(rA, rB) { return amLevenshtein(amNormalize(rA.tokenSorted), amNormalize(rB.tokenSorted)); }
+      function amRawEditSim(rA, rB) { return amLevenshtein(rA.normalized, rB.normalized); }
+
+      function amTechAgreement(rA, rB) {
+        const tA = rA.technicalMarkers, tB = rB.technicalMarkers;
+        if (!tA.length && !tB.length) return 0.5;
+        if (!tA.length || !tB.length) return 0;
+        let m = 0; for (const t of tA) { if (tB.includes(t)) m++; }
+        return m / Math.max(tA.length, tB.length);
+      }
+
+      function amSubstrBoost(rA, rB) { return (rA.normalized.includes(rB.normalized) || rB.normalized.includes(rA.normalized)) ? 1 : 0; }
+
+      function amDescConflict(rA, rB, cfg) {
+        for (const [d1, d2] of (cfg || AM_DEFAULT_CONFIG).conflictPairs) {
+          const aH1 = rA.descriptors.includes(d1) || rA.tokens.includes(d1);
+          const aH2 = rA.descriptors.includes(d2) || rA.tokens.includes(d2);
+          const bH1 = rB.descriptors.includes(d1) || rB.tokens.includes(d1);
+          const bH2 = rB.descriptors.includes(d2) || rB.tokens.includes(d2);
+          if ((aH1 && bH2) || (aH2 && bH1)) return 1;
+        }
+        return 0;
+      }
+
+      function amNumConflict(rA, rB) {
+        const nA = rA.tokens.filter(t => /^\d+$/.test(t)), nB = rB.tokens.filter(t => /^\d+$/.test(t));
+        if (!nA.length || !nB.length) return 0;
+        for (const a of nA) { for (const b of nB) { if (a !== b) return 1; } }
+        return 0;
+      }
+
+      function amComputeFeatures(mRep, iRep, cfg, docFreq, totalDocs, entityClusters) {
+        const coreOverlap = amTokenOverlap(mRep.tokens, iRep.tokens);
+        const wJac = amWeightedJaccard(mRep, iRep, docFreq, totalDocs);
+        const subset = amSubsetScore(mRep, iRep);
+        const tokenSort = amTokenSortSim(mRep, iRep);
+        const rawEdit = amRawEditSim(mRep, iRep);
+        const tech = amTechAgreement(mRep, iRep);
+        const substr = amSubstrBoost(mRep, iRep);
+        const descC = amDescConflict(mRep, iRep, cfg);
+        const numC = amNumConflict(mRep, iRep);
+        let entityBoost = 0;
+        if (entityClusters && entityClusters.length > 0) {
+          for (const cl of entityClusters) {
+            const vars = (cl.variants || []).map(amNormalize);
+            if (vars.some(v => mRep.normalized.includes(v) || v.includes(mRep.normalized)) &&
+                vars.some(v => iRep.normalized.includes(v) || v.includes(iRep.normalized))) { entityBoost = 1; break; }
+          }
+        }
+        const normM = new Set(mRep.tokens.map(amNormalize)), normI = new Set(iRep.tokens.map(amNormalize));
+        return {
+          coreTokenOverlap: coreOverlap, weightedJaccard: wJac, subsetScore: subset,
+          tokenSortSimilarity: tokenSort, rawEditSimilarity: rawEdit, technicalAgreement: tech,
+          substringBoost: substr, descriptorConflict: descC, numericConflict: numC,
+          confirmedEntityBoost: entityBoost,
+          sharedTokens: [...normM].filter(t => normI.has(t)),
+          mondayOnlyTokens: [...normM].filter(t => !normI.has(t)),
+          intersolOnlyTokens: [...normI].filter(t => !normM.has(t)),
+        };
+      }
+
+      function amComputeScore(features, cfg) {
+        const c = cfg || AM_DEFAULT_CONFIG;
+        const raw = c.weights.coreTokenOverlap * features.coreTokenOverlap +
+          c.weights.weightedJaccard * features.weightedJaccard +
+          c.weights.subsetScore * features.subsetScore +
+          c.weights.tokenSortSimilarity * features.tokenSortSimilarity +
+          c.weights.rawEditSimilarity * features.rawEditSimilarity +
+          c.weights.technicalAgreement * features.technicalAgreement +
+          c.weights.substringBoost * features.substringBoost -
+          c.penalties.descriptorConflict * features.descriptorConflict -
+          c.penalties.numericConflict * features.numericConflict +
+          c.boosts.confirmedEntityBoost * features.confirmedEntityBoost;
+        return Math.round(Math.max(0, Math.min(100, raw * 100)));
+      }
+
+      function amRankCandidates(mItem, entries, cfg, docFreq, totalDocs, entityClusters, knownBad) {
+        const c = cfg || AM_DEFAULT_CONFIG;
+        const allNames = entries.map(e => e.name);
+        const mRep = amBuildRep(mItem.name, allNames, c);
+        const results = [];
+        for (const entry of entries) {
+          if (knownBad && knownBad.has(`${mItem.name}|${entry.name}`)) continue;
+          const iRep = amBuildRep(entry.name, allNames, c);
+          const features = amComputeFeatures(mRep, iRep, c, docFreq, totalDocs, entityClusters);
+          const score = amComputeScore(features, c);
+          if (score >= c.thresholds.candidate) {
+            results.push({
+              intersolName: entry.name, intersolFields: entry.fields, intersolProj: entry.proj,
+              score, features,
+              scoreDetail: { token: Math.round(features.coreTokenOverlap * 100), levenshtein: Math.round(features.rawEditSimilarity * 100), substring: features.substringBoost > 0, combined: score },
+            });
+          }
+        }
+        results.sort((a, b) => b.score - a.score);
+        return results.slice(0, c.thresholds.maxCandidates);
+      }
+
+      function amMatchAll(mondayItems, intersolEntries, cfg, opts) {
+        const c = cfg || AM_DEFAULT_CONFIG;
+        const o = opts || {};
+        const knownBad = o.knownBad || new Set();
+        const skipPat = o.skipPatterns || /תבנית|טסט|בדיקה|ניסויים/;
+        const allNames = [...mondayItems.map(m => m.name), ...intersolEntries.map(e => e.name)];
+        const docFreq = amDocFrequency(allNames, c);
+        const totalDocs = allNames.length;
+        const entityClusters = o.entityClusters || [];
+        const auto = [], candidates = [];
+        for (const mItem of mondayItems) {
+          if (skipPat && skipPat.test(mItem.name)) continue;
+          const ranked = amRankCandidates(mItem, intersolEntries, c, docFreq, totalDocs, entityClusters, knownBad);
+          if (!ranked.length) continue;
+          const topScore = ranked[0].score, secondScore = ranked.length > 1 ? ranked[1].score : 0, gap = topScore - secondScore;
+          if (topScore >= c.thresholds.auto && (ranked.length === 1 || gap >= c.thresholds.autoGap)) {
+            auto.push({ mondayId: mItem.id, mondayName: mItem.name, intersolName: ranked[0].intersolName, intersolFields: ranked[0].intersolFields, intersolProj: ranked[0].intersolProj, score: ranked[0].scoreDetail, features: ranked[0].features, rank: 1, candidateCount: ranked.length, marginFromNext: gap });
+          } else {
+            candidates.push({ mondayId: mItem.id, mondayName: mItem.name, matches: ranked.map((r, i) => ({ intersolName: r.intersolName, intersolFields: r.intersolFields, score: r.scoreDetail, features: r.features, rank: i + 1 })) });
+          }
+        }
+        return { auto, candidates };
+      }
+
+      // ── Layer C: Feedback Store ──
+      async function amRecordFeedback(kv, event) {
+        if (!kv) return;
+        const full = { timestamp: event.timestamp || Date.now(), mondayId: event.mondayId, mondayName: event.mondayName || '', intersolName: event.intersolName || '', decision: event.decision, score: event.score || 0, rank: event.rank || 0, candidateCount: event.candidateCount || 0, marginFromNext: event.marginFromNext || 0, features: event.features || {}, sharedTokens: event.sharedTokens || [], mondayOnlyTokens: event.mondayOnlyTokens || [], intersolOnlyTokens: event.intersolOnlyTokens || [] };
+        let log = [];
+        try { const raw = await kv.get('feedback:log'); if (raw) log = JSON.parse(raw); } catch {}
+        log.push(full);
+        if (log.length > 500) log = log.slice(log.length - 500);
+        await kv.put('feedback:log', JSON.stringify(log));
+      }
+
+      async function amGetFeedbackHistory(kv, limit) {
+        if (!kv) return [];
+        try { const raw = await kv.get('feedback:log'); if (!raw) return []; const log = JSON.parse(raw); return (limit && limit > 0) ? log.slice(-limit) : log; } catch { return []; }
+      }
+
+      async function amLoadConfig(kv) {
+        if (!kv) return { ...AM_DEFAULT_CONFIG };
+        try {
+          const raw = await kv.get('feedback:config');
+          if (!raw) return { ...AM_DEFAULT_CONFIG };
+          const stored = JSON.parse(raw);
+          const result = {};
+          for (const key of Object.keys(AM_DEFAULT_CONFIG)) {
+            if (stored[key] !== undefined && typeof AM_DEFAULT_CONFIG[key] === 'object' && !Array.isArray(AM_DEFAULT_CONFIG[key])) {
+              result[key] = { ...AM_DEFAULT_CONFIG[key], ...stored[key] };
+            } else if (stored[key] !== undefined) { result[key] = stored[key]; } else { result[key] = AM_DEFAULT_CONFIG[key]; }
+          }
+          for (const key of Object.keys(stored)) { if (!(key in result)) result[key] = stored[key]; }
+          return result;
+        } catch { return { ...AM_DEFAULT_CONFIG }; }
+      }
+
+      async function amSaveConfig(kv, config) { if (kv) await kv.put('feedback:config', JSON.stringify(config)); }
+
+      // ── Layer D: Calibration ──
+      async function amCalibrate(kv) {
+        if (!kv) return { success: false, error: 'No KV namespace' };
+        let log = [];
+        try { const raw = await kv.get('feedback:log'); if (raw) log = JSON.parse(raw); } catch {}
+        if (log.length < 5) return { success: true, message: 'Insufficient feedback', events: log.length };
+
+        const currentCfg = await amLoadConfig(kv);
+        const WDMAX = 0.05, TDMAX = 2;
+
+        // D1: Token stats
+        const tokenStats = {};
+        for (const ev of log) {
+          const allTk = [...(ev.sharedTokens || []), ...(ev.mondayOnlyTokens || []), ...(ev.intersolOnlyTokens || [])];
+          for (const tk of allTk) {
+            if (!tokenStats[tk]) tokenStats[tk] = { approved: 0, rejected: 0, skipped: 0, total: 0, identityScore: 0, descriptorScore: 0, noiseScore: 0 };
+            tokenStats[tk].total++;
+            const isShared = (ev.sharedTokens || []).includes(tk);
+            if (ev.decision === 'approved' || ev.decision === 'auto') { tokenStats[tk].approved++; tokenStats[tk][isShared ? 'identityScore' : 'descriptorScore'] += isShared ? 1 : 0.5; }
+            else if (ev.decision === 'rejected') { tokenStats[tk].rejected++; if (isShared) tokenStats[tk].noiseScore += 0.5; }
+            else if (ev.decision === 'skipped') { tokenStats[tk].skipped++; }
+          }
+        }
+        for (const tk of Object.keys(tokenStats)) {
+          const s = tokenStats[tk];
+          const total = Math.max(s.identityScore + s.descriptorScore + s.noiseScore, 1);
+          s.identityScore /= total; s.descriptorScore /= total; s.noiseScore /= total;
+        }
+        await kv.put('feedback:token_stats', JSON.stringify(tokenStats));
+
+        // D2: Conflict pairs
+        const pairCounts = {};
+        for (const ev of log) {
+          if (ev.decision !== 'rejected' && ev.decision !== 'approved' && ev.decision !== 'auto') continue;
+          for (const mt of (ev.mondayOnlyTokens || [])) {
+            for (const it of (ev.intersolOnlyTokens || [])) {
+              const key = [mt, it].sort().join('|');
+              if (!pairCounts[key]) pairCounts[key] = { rejected: 0, approved: 0 };
+              pairCounts[key][ev.decision === 'rejected' ? 'rejected' : 'approved']++;
+            }
+          }
+        }
+        const existing = new Set((currentCfg.conflictPairs || []).map(p => [...p].sort().join('|')));
+        const newPairs = [...(currentCfg.conflictPairs || [])];
+        for (const [key, counts] of Object.entries(pairCounts)) {
+          const total = counts.rejected + counts.approved;
+          if (counts.rejected >= 3 && counts.rejected / total > 0.7 && !existing.has(key)) { newPairs.push(key.split('|')); existing.add(key); }
+        }
+        await kv.put('feedback:conflict_pairs', JSON.stringify(newPairs));
+
+        // D3: Weights
+        const approved = log.filter(e => e.decision === 'approved' || e.decision === 'auto');
+        const rejected = log.filter(e => e.decision === 'rejected');
+        const newW = { ...currentCfg.weights }, newP = { ...currentCfg.penalties }, newB = { ...currentCfg.boosts };
+
+        if (approved.length >= 5 && rejected.length >= 2) {
+          for (const fk of Object.keys(currentCfg.weights)) {
+            const aM = approved.reduce((s, e) => s + ((e.features || {})[fk] || 0), 0) / approved.length;
+            const rM = rejected.reduce((s, e) => s + ((e.features || {})[fk] || 0), 0) / rejected.length;
+            newW[fk] = Math.max(0, Math.min(0.5, newW[fk] + Math.max(-WDMAX, Math.min(WDMAX, (aM - rM) * 0.1))));
+          }
+          for (const pk of Object.keys(currentCfg.penalties)) {
+            const aM = approved.reduce((s, e) => s + ((e.features || {})[pk] || 0), 0) / approved.length;
+            const rM = rejected.reduce((s, e) => s + ((e.features || {})[pk] || 0), 0) / rejected.length;
+            newP[pk] = Math.max(0, Math.min(0.5, newP[pk] + Math.max(-WDMAX, Math.min(WDMAX, (rM - aM) * 0.1))));
+          }
+          for (const bk of Object.keys(currentCfg.boosts)) {
+            const aM = approved.reduce((s, e) => s + ((e.features || {})[bk] || 0), 0) / approved.length;
+            const rM = rejected.reduce((s, e) => s + ((e.features || {})[bk] || 0), 0) / rejected.length;
+            newB[bk] = Math.max(0, Math.min(0.5, newB[bk] + Math.max(-WDMAX, Math.min(WDMAX, (aM - rM) * 0.1))));
+          }
+          const wSum = Object.values(newW).reduce((s, v) => s + v, 0) + Object.values(newP).reduce((s, v) => s + v, 0) + Object.values(newB).reduce((s, v) => s + v, 0);
+          if (wSum > 0) { for (const k in newW) newW[k] /= wSum; for (const k in newP) newP[k] /= wSum; for (const k in newB) newB[k] /= wSum; }
+        }
+
+        // D4: Thresholds
+        const newTh = { ...currentCfg.thresholds };
+        if (approved.length >= 5) {
+          const aScores = approved.map(e => e.score || 0).sort((a, b) => a - b);
+          const ideal = aScores[Math.floor(aScores.length * 0.1)] || newTh.auto;
+          newTh.auto = Math.round(Math.max(50, Math.min(95, newTh.auto + Math.max(-TDMAX, Math.min(TDMAX, ideal - newTh.auto)))));
+          const idealC = Math.max(20, (aScores[Math.floor(aScores.length * 0.05)] || 40) - 10);
+          newTh.candidate = Math.round(Math.max(20, Math.min(70, newTh.candidate + Math.max(-TDMAX, Math.min(TDMAX, idealC - newTh.candidate)))));
+          const autoEvts = log.filter(e => e.decision === 'auto' && e.marginFromNext > 0);
+          if (autoEvts.length >= 5) {
+            const margins = autoEvts.map(e => e.marginFromNext).sort((a, b) => a - b);
+            const p25 = margins[Math.floor(margins.length * 0.25)] || 20;
+            newTh.autoGap = Math.round(Math.max(5, Math.min(40, newTh.autoGap + Math.max(-TDMAX, Math.min(TDMAX, p25 - newTh.autoGap)))));
+          }
+        }
+
+        // D5: Entity clusters
+        let existClusters = [];
+        try { const raw = await kv.get('feedback:entity_clusters'); if (raw) existClusters = JSON.parse(raw); } catch {}
+        const clusterMap = new Map();
+        for (let i = 0; i < existClusters.length; i++) { for (const v of (existClusters[i].variants || [])) clusterMap.set(amNormalize(v), i); }
+        for (const ev of approved) {
+          const mN = amNormalize(ev.mondayName || ''), iN = amNormalize(ev.intersolName || '');
+          if (!mN || !iN) continue;
+          const idx = clusterMap.get(mN) ?? clusterMap.get(iN);
+          if (idx !== undefined) {
+            if (!existClusters[idx].variants.includes(ev.mondayName)) existClusters[idx].variants.push(ev.mondayName);
+            if (!existClusters[idx].variants.includes(ev.intersolName)) existClusters[idx].variants.push(ev.intersolName);
+            clusterMap.set(mN, idx); clusterMap.set(iN, idx);
+          } else {
+            const ni = existClusters.length;
+            existClusters.push({ variants: [ev.mondayName, ev.intersolName], approvedCount: 1 });
+            clusterMap.set(mN, ni); clusterMap.set(iN, ni);
+          }
+        }
+        await kv.put('feedback:entity_clusters', JSON.stringify(existClusters));
+
+        // D6: Dictionary suggestions
+        const suggestions = { newNoise: [], newDescriptors: [] };
+        for (const [tk, st] of Object.entries(tokenStats)) {
+          if (st.total < 5) continue;
+          if (st.noiseScore > 0.6 && st.identityScore < 0.2 && !currentCfg.noiseTokens.includes(tk)) suggestions.newNoise.push({ token: tk, noiseScore: st.noiseScore, total: st.total });
+          if (st.descriptorScore > 0.5 && st.identityScore < 0.3 && !currentCfg.descriptorTokens.includes(tk) && !currentCfg.noiseTokens.includes(tk)) suggestions.newDescriptors.push({ token: tk, descriptorScore: st.descriptorScore, total: st.total });
+        }
+
+        const updatedCfg = { ...currentCfg, weights: newW, penalties: newP, boosts: newB, thresholds: newTh, conflictPairs: newPairs };
+        await amSaveConfig(kv, updatedCfg);
+
+        return { success: true, events: log.length, approved: approved.length, rejected: rejected.length, skipped: log.filter(e => e.decision === 'skipped').length, updatedWeights: newW, updatedPenalties: newP, updatedBoosts: newB, updatedThresholds: newTh, newConflictPairs: newPairs.length, entityClusters: existClusters.length, dictionarySuggestions: suggestions };
+      }
+
+      // ── Helper: extract INTERSOL fields ──
+      function amExtractFields(proj) {
+        const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, project_name: proj.title };
+        for (const a of ((proj.projectInfo || {}).assets || [])) {
+          const v = a.value || '';
+          if (typeof v === 'object') { if (v.project_name) result.project_name = v.project_name; if (v.permit_limit) result.permit_limit = v.permit_limit; if (v.connection_size) result.connection_size = v.connection_size; if (v.solar_module) result.solar_module = v.solar_module; if (v.solar_inverter) result.solar_inverter = v.solar_inverter; }
+        }
+        return result;
+      }
+
+      function amGetDesignPlanUrls(proj) {
+        const dp = proj.designProgram;
+        if (!dp || !dp.assets || !dp.assets.length) return [];
+        const assets = dp.assets.filter(a => typeof a.value === 'string' && a.value.startsWith('http'));
+        if (!assets.length) return [];
+        if (assets.length === 1) return [{ label: assets[0].label, url: assets[0].value }];
+        const vp = /^תכנון מפורט\s*(\d*)$/;
+        const allV = assets.every(a => vp.test(a.label.trim()));
+        if (allV) { let best = assets[0], bestN = 1; for (const a of assets) { const mt = a.label.trim().match(vp); const n = mt[1] ? parseInt(mt[1]) : 1; if (n > bestN) { bestN = n; best = a; } } return [{ label: best.label, url: best.value }]; }
+        return assets.map(a => ({ label: a.label, url: a.value }));
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // ROUTES: INTERSOL Sync + Feedback + Config
+      // ══════════════════════════════════════════════════════════════════
+
+      // POST /intersol-sync - Adaptive matching + design plan PDF sync
       if (url.pathname === '/intersol-sync' && request.method === 'POST') {
         const INTERSOL_TOKEN_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/jwt-auth/v1/token';
         const INTERSOL_PROJECTS_URL = 'https://admin.intersol-sv.com/wp-api/wp-json/projects/list';
@@ -873,77 +1289,14 @@ export default {
 
         const KNOWN_BAD = new Set(['שוקי -סנדרין|שוקי חזן', 'יקיר יהב|חיים יהב']);
 
-        // ── Matching utilities (inline — same as intersol-sync-module.js) ──
-
-        const normalize = (s) => String(s).replace(/[\s\u0027\u2018\u2019\u002D\u2013]/g, '').replace('ג׳', 'ג');
-
-        const NOISE_TOKENS = new Set(['בהמתנה', 'ל', 'לט', 'ט', 'ממתין', 'הושלם', 'בוטל', 'פעיל', 'PV', 'PV1', 'PV2', 'PV3', 'PV4']);
-
-        function tokenize(s) {
-          return String(s).replace('ג׳', 'ג').replace(/[()[\]{}\-–—,.:;'"׳\/\\]/g, ' ')
-            .split(/\s+/).map(t => t.trim()).filter(t => t.length > 0 && !NOISE_TOKENS.has(t));
-        }
-
-        function tokenOverlap(tokensA, tokensB) {
-          if (!tokensA.length || !tokensB.length) return 0;
-          const normA = tokensA.map(normalize), normB = tokensB.map(normalize);
-          let matches = 0;
-          for (const ta of normA) {
-            if (normB.includes(ta)) { matches++; continue; }
-            for (const tb of normB) { if (tb.includes(ta) || ta.includes(tb)) { matches += 0.5; break; } }
-          }
-          return matches / Math.min(normA.length, normB.length);
-        }
-
-        function levenshtein(a, b) {
-          if (!a || !b) return 0;
-          const m = Array.from({ length: a.length + 1 }, (_, i) => [i]);
-          for (let j = 0; j <= b.length; j++) m[0][j] = j;
-          for (let i = 1; i <= a.length; i++)
-            for (let j = 1; j <= b.length; j++)
-              m[i][j] = Math.min(m[i-1][j]+1, m[i][j-1]+1, m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
-          return 1 - m[a.length][b.length] / Math.max(a.length, b.length);
-        }
-
-        function combinedScore(mondayName, intersolName) {
-          const mNorm = normalize(mondayName), iNorm = normalize(intersolName);
-          const tokenScore = tokenOverlap(tokenize(mondayName), tokenize(intersolName));
-          const levScore = levenshtein(mNorm, iNorm);
-          const isSubstr = mNorm.includes(iNorm) || iNorm.includes(mNorm);
-          return {
-            token: Math.round(tokenScore * 100),
-            levenshtein: Math.round(levScore * 100),
-            substring: isSubstr,
-            combined: Math.round((tokenScore * 0.55 + levScore * 0.25 + (isSubstr ? 0.20 : 0)) * 100),
-          };
-        }
-
-        function extractFields(proj) {
-          const result = { kwp: proj.kwp, permit_limit: null, solar_module: null, solar_inverter: null, connection_size: null, project_name: proj.title };
-          for (const a of ((proj.projectInfo || {}).assets || [])) {
-            const v = a.value || '';
-            if (typeof v === 'object') { Object.assign(result, { ...v.project_name && { project_name: v.project_name }, ...v.permit_limit && { permit_limit: v.permit_limit }, ...v.connection_size && { connection_size: v.connection_size }, ...v.solar_module && { solar_module: v.solar_module }, ...v.solar_inverter && { solar_inverter: v.solar_inverter } }); }
-          }
-          return result;
-        }
-
-        function getDesignPlanUrls(proj) {
-          const dp = proj.designProgram;
-          if (!dp || !dp.assets || !dp.assets.length) return [];
-          const assets = dp.assets.filter(a => typeof a.value === 'string' && a.value.startsWith('http'));
-          if (!assets.length) return [];
-          if (assets.length === 1) return [{ label: assets[0].label, url: assets[0].value }];
-          const versionPattern = /^תכנון מפורט\s*(\d*)$/;
-          const allVersioned = assets.every(a => versionPattern.test(a.label.trim()));
-          if (allVersioned) {
-            let best = assets[0], bestNum = 1;
-            for (const a of assets) { const m = a.label.trim().match(versionPattern); const n = m[1] ? parseInt(m[1]) : 1; if (n > bestNum) { bestNum = n; best = a; } }
-            return [{ label: best.label, url: best.value }];
-          }
-          return assets.map(a => ({ label: a.label, url: a.value }));
-        }
-
         try {
+          // Load adaptive config from KV
+          const matchConfig = await amLoadConfig(env.TASKS_CACHE);
+
+          // Load entity clusters for entity boost
+          let entityClusters = [];
+          try { const raw = await env.TASKS_CACHE.get('feedback:entity_clusters'); if (raw) entityClusters = JSON.parse(raw); } catch {}
+
           // Step 1: Login to INTERSOL
           const tokenRes = await fetch(INTERSOL_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }) });
           if (!tokenRes.ok) throw new Error('INTERSOL login failed');
@@ -970,34 +1323,25 @@ export default {
             hasMore = !!cursor;
           }
 
-          // Step 4: Multi-candidate matching
+          // Step 4: Adaptive multi-candidate matching
           const intersolEntries = intersolProjects.map(proj => {
-            const fields = extractFields(proj);
+            const fields = amExtractFields(proj);
             return { proj, fields, name: fields.project_name || proj.title || '' };
           });
 
-          const autoMatches = [];
-          const candidates = [];
-          const skipRe = /תבנית|טסט|בדיקה|ניסויים/;
+          const { auto: autoMatches, candidates } = amMatchAll(mondayItems, intersolEntries, matchConfig, {
+            knownBad: KNOWN_BAD,
+            entityClusters,
+          });
 
-          for (const mItem of mondayItems) {
-            if (skipRe.test(mItem.name)) continue;
-            const scored = [];
-            for (const entry of intersolEntries) {
-              if (KNOWN_BAD.has(`${mItem.name}|${entry.name}`)) continue;
-              const score = combinedScore(mItem.name, entry.name);
-              if (score.combined >= 40) scored.push({ ...entry, score });
-            }
-            if (!scored.length) continue;
-            scored.sort((a, b) => b.score.combined - a.score.combined);
-            const top = scored.slice(0, 5);
-            const topScore = top[0].score.combined;
-            const secondScore = top.length > 1 ? top[1].score.combined : 0;
-            if (topScore >= 85 && (top.length === 1 || topScore - secondScore >= 20)) {
-              autoMatches.push({ mondayId: mItem.id, mondayName: mItem.name, intersolName: top[0].name, intersolFields: top[0].fields, intersolProj: top[0].proj, score: top[0].score });
-            } else {
-              candidates.push({ mondayId: mItem.id, mondayName: mItem.name, matches: top.map(t => ({ intersolName: t.name, intersolFields: t.fields, score: t.score })) });
-            }
+          // Record auto-match feedback events
+          for (const m of autoMatches) {
+            await amRecordFeedback(env.TASKS_CACHE, {
+              mondayId: m.mondayId, mondayName: m.mondayName, intersolName: m.intersolName,
+              decision: 'auto', score: m.score.combined, rank: m.rank, candidateCount: m.candidateCount,
+              marginFromNext: m.marginFromNext, features: m.features,
+              sharedTokens: (m.features || {}).sharedTokens, mondayOnlyTokens: (m.features || {}).mondayOnlyTokens, intersolOnlyTokens: (m.features || {}).intersolOnlyTokens,
+            });
           }
 
           // Step 5: Update Monday columns for auto matches
@@ -1036,7 +1380,7 @@ export default {
           const designErrors = [];
 
           for (const m of autoMatches) {
-            const planUrls = getDesignPlanUrls(m.intersolProj);
+            const planUrls = amGetDesignPlanUrls(m.intersolProj);
             if (!planUrls.length) { designSkipped++; continue; }
 
             const cacheKey = `design_plan:${m.mondayId}`;
@@ -1050,26 +1394,21 @@ export default {
               continue;
             }
 
-            // Download + upload each PDF
             let allOk = true;
             for (const plan of planUrls) {
               try {
                 const pdfRes = await fetch(plan.url);
                 if (!pdfRes.ok) { designErrors.push({ project: m.mondayName, error: `PDF download failed: ${pdfRes.status}` }); allOk = false; break; }
                 const pdfBlob = await pdfRes.blob();
-
                 const query = `mutation ($file: File!) { add_file_to_column(item_id: ${m.mondayId}, column_id: "${DESIGN_PLAN_COL}", file: $file) { id } }`;
                 const form = new FormData();
                 form.append('query', query);
                 form.append('map', JSON.stringify({ image: 'variables.file' }));
                 form.append('image', new File([pdfBlob], `design_plan_${m.mondayId}.pdf`, { type: 'application/pdf' }));
-
                 const upRes = await fetch('https://api.monday.com/v2/file', { method: 'POST', headers: { 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: form });
                 const upData = await upRes.json();
                 if (upData.errors) { designErrors.push({ project: m.mondayName, error: upData.errors }); allOk = false; break; }
-              } catch (e) {
-                designErrors.push({ project: m.mondayName, error: e.message }); allOk = false; break;
-              }
+              } catch (e) { designErrors.push({ project: m.mondayName, error: e.message }); allOk = false; break; }
             }
 
             if (allOk) {
@@ -1078,15 +1417,23 @@ export default {
             }
           }
 
+          // Run calibration if mode is 'auto'
+          let calibrationResult = null;
+          if (matchConfig.mode === 'auto') {
+            calibrationResult = await amCalibrate(env.TASKS_CACHE);
+          }
+
           return new Response(JSON.stringify({
             success: true,
             intersol_total: intersolProjects.length,
             monday_total: mondayItems.length,
             matched: autoMatches.length,
             updated,
+            matcherMode: matchConfig.mode,
             designPlans: { uploaded: designUploaded, skipped: designSkipped, errors: designErrors.length > 0 ? designErrors : undefined },
             errors: errors.length > 0 ? errors : undefined,
             pendingMatches: candidates.length > 0 ? candidates : undefined,
+            calibration: calibrationResult,
           }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
@@ -1099,12 +1446,11 @@ export default {
         }
       }
 
-      // POST /apply-match - Apply a fuzzy match: rename Monday item + update columns
-      // body: { mondayId, intersolFields }
+      // POST /apply-match - Apply a fuzzy match + record approved feedback
       if (url.pathname === '/apply-match' && request.method === 'POST') {
         try {
           const body = await request.json();
-          const { mondayId, intersolFields } = body;
+          const { mondayId, intersolFields, mondayName, intersolName, score, features, rank, candidateCount } = body;
           if (!mondayId || !intersolFields) {
             return new Response(JSON.stringify({ success: false, error: 'Missing mondayId or intersolFields' }), {
               status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -1128,7 +1474,6 @@ export default {
           if (intersolFields.connection_size) colValues[COLUMN_MAP.connection_size] = intersolFields.connection_size;
           if (intersolFields.permit_limit) colValues[COLUMN_MAP.ac_power] = String(intersolFields.permit_limit);
 
-          // Update column values
           if (Object.keys(colValues).length > 0) {
             const mutation = `mutation { change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${mondayId}, column_values: ${JSON.stringify(JSON.stringify(colValues))}) { id } }`;
             const res = await fetch('https://api.monday.com/v2', {
@@ -1144,7 +1489,68 @@ export default {
             }
           }
 
+          // Record "approved" feedback
+          await amRecordFeedback(env.TASKS_CACHE, {
+            mondayId, mondayName: mondayName || '', intersolName: intersolName || '',
+            decision: 'approved', score: score || 0, rank: rank || 0,
+            candidateCount: candidateCount || 0,
+            features: features || {},
+            sharedTokens: (features || {}).sharedTokens || [],
+            mondayOnlyTokens: (features || {}).mondayOnlyTokens || [],
+            intersolOnlyTokens: (features || {}).intersolOnlyTokens || [],
+          });
+
           return new Response(JSON.stringify({ success: true, mondayId }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // POST /intersol-feedback - Record a feedback event (skip/reject from frontend)
+      if (url.pathname === '/intersol-feedback' && request.method === 'POST') {
+        try {
+          const body = await request.json();
+          await amRecordFeedback(env.TASKS_CACHE, body);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ success: false, error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // GET /intersol-config - Return current adaptive config
+      if (url.pathname === '/intersol-config' && request.method === 'GET') {
+        try {
+          const config = await amLoadConfig(env.TASKS_CACHE);
+          const history = await amGetFeedbackHistory(env.TASKS_CACHE);
+          return new Response(JSON.stringify({
+            config,
+            feedbackCount: history.length,
+            approved: history.filter(e => e.decision === 'approved' || e.decision === 'auto').length,
+            rejected: history.filter(e => e.decision === 'rejected').length,
+            skipped: history.filter(e => e.decision === 'skipped').length,
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      // POST /intersol-calibrate - Manually trigger calibration
+      if (url.pathname === '/intersol-calibrate' && request.method === 'POST') {
+        try {
+          const result = await amCalibrate(env.TASKS_CACHE);
+          return new Response(JSON.stringify(result), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         } catch (e) {

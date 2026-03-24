@@ -2435,7 +2435,16 @@
       const res = await fetch(`${WORKER_URL}/apply-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mondayId: group.mondayId, intersolFields: match.intersolFields }),
+        body: JSON.stringify({
+          mondayId: group.mondayId,
+          intersolFields: match.intersolFields,
+          mondayName: group.mondayName,
+          intersolName: match.intersolName,
+          score: match.score ? match.score.combined : 0,
+          features: match.features || {},
+          rank: match.rank || (mi + 1),
+          candidateCount: group.matches.length,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -2456,6 +2465,29 @@
     const grp = document.getElementById(`ism-grp-${gi}`);
     grp.style.opacity = '0.3';
     document.getElementById(`ism-act-${gi}`).innerHTML = '<span style="color:var(--text-muted);">דילוג</span>';
+
+    // Send skip feedback for all candidates in this group
+    const group = _matchCandidates[gi];
+    if (group && group.matches && group.matches.length > 0) {
+      const topMatch = group.matches[0];
+      fetch(`${WORKER_URL}/intersol-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mondayId: group.mondayId,
+          mondayName: group.mondayName,
+          intersolName: topMatch.intersolName,
+          decision: 'skipped',
+          score: topMatch.score ? topMatch.score.combined : 0,
+          rank: 1,
+          candidateCount: group.matches.length,
+          features: topMatch.features || {},
+          sharedTokens: (topMatch.features || {}).sharedTokens || [],
+          mondayOnlyTokens: (topMatch.features || {}).mondayOnlyTokens || [],
+          intersolOnlyTokens: (topMatch.features || {}).intersolOnlyTokens || [],
+        }),
+      }).catch(() => {}); // fire and forget
+    }
   }
 
   function closeMatchModal() {
