@@ -2342,8 +2342,11 @@
       if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
 
     } catch (e) {
-      updateSyncLine('connect', `שגיאת חיבור: ${e.message}`, true);
-      setTimeout(hideSyncStatus, 5000);
+      const msg = e.message === 'Failed to fetch'
+        ? 'שגיאת חיבור: השרת לא הגיב (timeout או בעיית רשת)'
+        : `שגיאת חיבור: ${e.message}`;
+      updateSyncLine('connect', msg, true);
+      setTimeout(hideSyncStatus, 8000);
     } finally {
       btn.disabled = false;
       icon.style.animation = '';

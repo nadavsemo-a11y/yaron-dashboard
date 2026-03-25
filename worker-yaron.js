@@ -1,5 +1,30 @@
 // Cloudflare Worker - Monday.com Integration for Yaron (with pagination)
 
+// ── Fetch with timeout + retry ──
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchWithRetry(url, options = {}, { timeout = 10000, retries = 2, backoff = 1000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetchWithTimeout(url, options, timeout);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise(r => setTimeout(r, backoff * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 export default {
   async fetch(request, env) {
     const corsHeaders = {
@@ -1308,17 +1333,23 @@ export default {
           let entityClusters = [];
           try { const raw = await env.TASKS_CACHE.get('feedback:entity_clusters'); if (raw) entityClusters = JSON.parse(raw); } catch {}
 
-          // Step 1: Login to INTERSOL
-          const tokenRes = await fetch(INTERSOL_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }) });
-          if (!tokenRes.ok) throw new Error('INTERSOL login failed');
+          // Step 1: Login to INTERSOL (with retry + timeout)
+          const tokenRes = await fetchWithRetry(INTERSOL_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: INTERSOL_USER, password: INTERSOL_PASS }),
+          }, { timeout: 12000, retries: 2, backoff: 1500 });
+          if (!tokenRes.ok) throw new Error(`INTERSOL login failed (${tokenRes.status})`);
           const token = (await tokenRes.json()).token;
 
-          // Step 2: Fetch all INTERSOL projects
-          const projRes = await fetch(INTERSOL_PROJECTS_URL, { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' } });
-          if (!projRes.ok) throw new Error('INTERSOL fetch failed');
+          // Step 2: Fetch all INTERSOL projects (with retry + timeout)
+          const projRes = await fetchWithRetry(INTERSOL_PROJECTS_URL, {
+            headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+          }, { timeout: 15000, retries: 2, backoff: 2000 });
+          if (!projRes.ok) throw new Error(`INTERSOL fetch failed (${projRes.status})`);
           const intersolProjects = (await projRes.json()).list || [];
 
-          // Step 3: Fetch Monday items
+          // Step 3: Fetch Monday items (with timeout)
           let mondayItems = [];
           let cursor = null;
           let hasMore = true;
@@ -1326,7 +1357,11 @@ export default {
             const q = cursor
               ? `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500, cursor: "${cursor}") { cursor items { id name } } } }`
               : `query { boards(ids: ${env.MONDAY_BOARD_ID}) { items_page(limit: 500) { cursor items { id name } } } }`;
-            const mRes = await fetch('https://api.monday.com/v2', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: JSON.stringify({ query: q }) });
+            const mRes = await fetchWithRetry('https://api.monday.com/v2', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+              body: JSON.stringify({ query: q }),
+            }, { timeout: 10000, retries: 1 });
             const mData = await mRes.json();
             const page = mData.data.boards[0].items_page;
             mondayItems = mondayItems.concat(page.items);
@@ -1376,7 +1411,11 @@ export default {
               `a${idx}: change_multiple_column_values(board_id: ${env.MONDAY_BOARD_ID}, item_id: ${b.id}, column_values: ${JSON.stringify(JSON.stringify(b.colValues))}) { id }`
             ).join('\n');
             try {
-              const uRes = await fetch('https://api.monday.com/v2', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: JSON.stringify({ query: `mutation { ${mutations} }` }) });
+              const uRes = await fetchWithRetry('https://api.monday.com/v2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                body: JSON.stringify({ query: `mutation { ${mutations} }` }),
+              }, { timeout: 12000, retries: 1 });
               const uData = await uRes.json();
               if (uData.errors) batch.forEach(b => errors.push({ project: b.name, error: uData.errors }));
               else updated += batch.length;
@@ -1385,11 +1424,14 @@ export default {
             }
           }
 
-          // Step 6: Sync design plan PDFs (only changed files, KV cache)
+          // Step 6: Sync design plan PDFs (best-effort, max 3 uploads per sync to avoid timeout)
           let designUploaded = 0, designSkipped = 0;
           const designErrors = [];
+          const MAX_PDF_UPLOADS = 3;
 
           for (const m of autoMatches) {
+            if (designUploaded >= MAX_PDF_UPLOADS) { designSkipped++; continue; }
+
             const planUrls = amGetDesignPlanUrls(m.intersolProj);
             if (!planUrls.length) { designSkipped++; continue; }
 
@@ -1407,7 +1449,7 @@ export default {
             let allOk = true;
             for (const plan of planUrls) {
               try {
-                const pdfRes = await fetch(plan.url);
+                const pdfRes = await fetchWithTimeout(plan.url, {}, 8000);
                 if (!pdfRes.ok) { designErrors.push({ project: m.mondayName, error: `PDF download failed: ${pdfRes.status}` }); allOk = false; break; }
                 const pdfBlob = await pdfRes.blob();
                 const query = `mutation ($file: File!) { add_file_to_column(item_id: ${m.mondayId}, column_id: "${DESIGN_PLAN_COL}", file: $file) { id } }`;
@@ -1415,7 +1457,11 @@ export default {
                 form.append('query', query);
                 form.append('map', JSON.stringify({ image: 'variables.file' }));
                 form.append('image', new File([pdfBlob], `design_plan_${m.mondayId}.pdf`, { type: 'application/pdf' }));
-                const upRes = await fetch('https://api.monday.com/v2/file', { method: 'POST', headers: { 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' }, body: form });
+                const upRes = await fetchWithTimeout('https://api.monday.com/v2/file', {
+                  method: 'POST',
+                  headers: { 'Authorization': env.MONDAY_API_TOKEN, 'API-Version': '2024-10' },
+                  body: form,
+                }, 10000);
                 const upData = await upRes.json();
                 if (upData.errors) { designErrors.push({ project: m.mondayName, error: upData.errors }); allOk = false; break; }
               } catch (e) { designErrors.push({ project: m.mondayName, error: e.message }); allOk = false; break; }
@@ -1429,9 +1475,11 @@ export default {
 
           // Run calibration if mode is 'auto'
           let calibrationResult = null;
-          if (matchConfig.mode === 'auto') {
-            calibrationResult = await amCalibrate(env.TASKS_CACHE);
-          }
+          try {
+            if (matchConfig.mode === 'auto') {
+              calibrationResult = await amCalibrate(env.TASKS_CACHE);
+            }
+          } catch (_) { /* calibration is non-critical */ }
 
           return new Response(JSON.stringify({
             success: true,
