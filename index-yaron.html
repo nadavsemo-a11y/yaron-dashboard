@@ -1260,6 +1260,109 @@
   .btn-phone-send:hover { opacity: 0.85; }
   .btn-phone-cancel { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border) !important; }
   .btn-phone-cancel:hover { color: var(--text); }
+
+  /* ── Desk Clean Module ── */
+  .desk-clean-banner {
+    margin: 12px 16px;
+    background: linear-gradient(135deg, #1a1d27 0%, #1e2235 100%);
+    border: 1px solid #2e3248;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 0.3s;
+  }
+  .dcb-header {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .dcb-header:hover { background: rgba(79,142,247,0.05); }
+  .dcb-icon { font-size: 22px; }
+  .dcb-text { flex: 1; }
+  .dcb-title { font-size: 15px; font-weight: 700; color: #e8eaf6; }
+  .dcb-sub { font-size: 12px; color: #7a7f99; margin-top: 2px; }
+  .dcb-actions { display: flex; align-items: center; gap: 8px; }
+  .dcb-skip, .dcb-close {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #7a7f99;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .dcb-skip:hover, .dcb-close:hover { background: rgba(255,255,255,0.1); color: #e8eaf6; }
+  .dcb-arrow { color: #4f8ef7; font-size: 14px; transition: transform 0.3s; }
+  .dcb-arrow.open { transform: rotate(90deg); }
+  .dcb-body { padding: 0 18px 16px; }
+  .dcb-items { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+  .dcb-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #2e3248;
+    border-radius: 8px;
+    font-size: 13px;
+    transition: all 0.2s;
+  }
+  .dcb-item:hover { background: rgba(79,142,247,0.08); border-color: rgba(79,142,247,0.3); }
+  .dcb-item-name { flex: 1; font-weight: 500; }
+  .dcb-item-task { color: #7a7f99; font-size: 12px; }
+  .dcb-item-input {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid #2e3248;
+    border-radius: 6px;
+    color: #e8eaf6;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 120px;
+    text-align: center;
+    direction: ltr;
+  }
+  .dcb-item-input:focus { border-color: #4f8ef7; outline: none; }
+  .dcb-item-btn {
+    background: #4f8ef7;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .dcb-item-btn:hover { background: #3a7ae0; }
+  .dcb-item-btn.saved { background: #6dbf67; }
+  .dcb-item-select {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid #2e3248;
+    border-radius: 6px;
+    color: #e8eaf6;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-family: inherit;
+    max-width: 160px;
+  }
+  .dcb-count {
+    background: rgba(79,142,247,0.15);
+    color: #4f8ef7;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .dcb-empty { text-align: center; padding: 20px; color: #6dbf67; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -1338,6 +1441,24 @@
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
+
+<div class="desk-clean-banner" id="deskCleanBanner" style="display:none">
+  <div class="dcb-header" onclick="toggleDeskClean()">
+    <div class="dcb-icon">🧹</div>
+    <div class="dcb-text">
+      <div class="dcb-title" id="dcbTitle">ניקוי שולחן</div>
+      <div class="dcb-sub" id="dcbSub">לוקח רגע...</div>
+    </div>
+    <div class="dcb-actions">
+      <button class="dcb-skip" onclick="event.stopPropagation();nextDeskTask()" title="משימה אחרת">⟳</button>
+      <button class="dcb-close" onclick="event.stopPropagation();closeDeskClean()" title="סגור">✕</button>
+      <span class="dcb-arrow" id="dcbArrow">▸</span>
+    </div>
+  </div>
+  <div class="dcb-body" id="dcbBody" style="display:none">
+    <div class="dcb-items" id="dcbItems"></div>
+  </div>
+</div>
 
 <div class="list-container" id="listContainer">
   <div class="state-box">
@@ -1436,6 +1557,7 @@
       populateProjectFilter();
       renderStats();
       renderFiltered();
+      initDeskClean();
       const isCached = tasksRes.headers.get('X-Cache') === 'HIT';
       showToast(`נטענו ${allTasks.length} משימות ✓${isCached ? '' : ''}`);
 
@@ -2339,7 +2461,7 @@
 
       // Refresh dashboard
       const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
-      if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+      if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); initDeskClean(); }
 
     } catch (e) {
       const msg = e.message === 'Failed to fetch'
@@ -2844,7 +2966,7 @@
 
       if (data.updated > 0) {
         const taskRes = await fetch(`${WORKER_URL}/items?nocache=true`);
-        if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); }
+        if (taskRes.ok) { allTasks = await taskRes.json(); renderFiltered(); initDeskClean(); }
       }
 
       if (data.pendingMatches && data.pendingMatches.length > 0) {
@@ -2856,6 +2978,223 @@
     } catch {
       hideSyncStatus();
     }
+  }
+
+
+  // ── Desk Clean Module ──
+  const DESK_TASKS = [
+    // Category A: Assign Suppliers
+    { id: 'assign-ac', cat: 'שיוך ספקים', title: 'שייך חשמלאי AC', desc: 'פרויקטים עם משימת "חשמלאי AC" ללא ספק',
+      filter: t => t.name && t.name.includes('חשמלאי AC') && !t.supplier, type: 'supplier' },
+    { id: 'assign-dc', cat: 'שיוך ספקים', title: 'שייך חשמלאי DC', desc: 'פרויקטים עם משימת "מיתוג" ללא ספק',
+      filter: t => t.name && (t.name.includes('חשמלאי DC') || t.name.includes('מיתוג')) && !t.supplier, type: 'supplier' },
+    { id: 'assign-construction', cat: 'שיוך ספקים', title: 'שייך קבלן קונסטרוקציה', desc: 'התקנת קונסטרוקציה ללא ספק',
+      filter: t => t.name && t.name.includes('קונסטרוקציה') && !t.supplier, type: 'supplier' },
+    { id: 'assign-crane', cat: 'שיוך ספקים', title: 'שייך קבלן הנפה/מנוף', desc: 'הובלה והנפה ללא ספק',
+      filter: t => t.name && (t.name.includes('הובלה') || t.name.includes('הנפה')) && !t.supplier, type: 'supplier' },
+    { id: 'assign-panels', cat: 'שיוך ספקים', title: 'שייך קבלן התקנת פאנלים', desc: 'התקנת פאנלים ללא ספק',
+      filter: t => t.name && t.name.includes('פאנלים') && t.name.includes('התקנ') && !t.supplier, type: 'supplier' },
+    { id: 'assign-meter', cat: 'שיוך ספקים', title: 'שייך חשמלאי חיבור מונה', desc: 'חיבור מונה ללא ספק',
+      filter: t => t.name && t.name.includes('מונה') && !t.supplier, type: 'supplier' },
+    { id: 'assign-inspector', cat: 'שיוך ספקים', title: 'שייך בודק חשמל', desc: 'בדיקת תקינות ללא ספק',
+      filter: t => t.name && t.name.includes('בדיק') && t.name.includes('חשמל') && !t.supplier, type: 'supplier' },
+    { id: 'assign-photographer', cat: 'שיוך ספקים', title: 'שייך צלם/מודד', desc: 'צילום ומדידה ללא ספק',
+      filter: t => t.name && (t.name.includes('צילום') || t.name.includes('מדידה')) && !t.supplier, type: 'supplier' },
+
+    // Category B: Enter Costs
+    { id: 'cost-panels', cat: 'הזנת מחירים', title: 'הזן מחיר פאנלים', desc: 'הזמנת פאנלים ללא עלות',
+      filter: t => t.name && t.name.includes('פאנלים') && t.name.includes('הזמנ'), type: 'cost' },
+    { id: 'cost-inverters', cat: 'הזנת מחירים', title: 'הזן מחיר ממירים', desc: 'הזמנת ממירים ללא עלות',
+      filter: t => t.name && t.name.includes('ממיר') && t.name.includes('הזמנ'), type: 'cost' },
+    { id: 'cost-construction', cat: 'הזנת מחירים', title: 'הזן מחיר קונסטרוקציה', desc: 'הזמנת קונסטרוקציה ללא עלות',
+      filter: t => t.name && t.name.includes('קונסטרוקציה') && t.name.includes('הזמנ'), type: 'cost' },
+    { id: 'cost-ac', cat: 'הזנת מחירים', title: 'הזן מחיר חשמלאי AC', desc: 'חשמלאי AC ללא עלות',
+      filter: t => t.name && t.name.includes('חשמלאי AC'), type: 'cost' },
+    { id: 'cost-crane', cat: 'הזנת מחירים', title: 'הזן מחיר הנפה', desc: 'הובלה והנפה ללא עלות',
+      filter: t => t.name && (t.name.includes('הובלה') || t.name.includes('הנפה')), type: 'cost' },
+
+    // Category C: Update Statuses
+    { id: 'status-stuck', cat: 'עדכון סטטוסים', title: 'עדכן משימות תקועות', desc: 'משימות על "ממתין" יותר מ-7 ימים',
+      filter: t => t.status === 'ממתין' && t.date && (Date.now() - new Date(t.date).getTime()) > 7*86400000, type: 'status' },
+    { id: 'status-nodate', cat: 'עדכון סטטוסים', title: 'משימות "בתהליך" ללא תאריך', desc: 'בתהליך אבל בלי תאריך מתוכנן',
+      filter: t => t.status === 'בתהליך' && !t.date, type: 'status' },
+
+    // Category D: Schedule
+    { id: 'date-new', cat: 'תיאום לוזים', title: 'קבע תאריך לפרויקטים חדשים', desc: 'משימות "טרם החל" ללא תאריך',
+      filter: t => t.status === 'טרם החל' && !t.date, type: 'date' },
+    { id: 'date-overdue', cat: 'תיאום לוזים', title: 'עדכן תאריכים שעברו', desc: 'משימות עם תאריך שעבר ולא הושלמו',
+      filter: t => t.date && new Date(t.date) < new Date() && t.status !== 'בוצע', type: 'date' },
+  ];
+
+  let deskTaskIndex = -1;
+  let suppliersList = [];
+
+  async function initDeskClean() {
+    try {
+      const res = await fetch(`${WORKER_URL}/suppliers`);
+      if (res.ok) suppliersList = await res.json();
+    } catch(e) {}
+
+    nextDeskTask();
+    document.getElementById('deskCleanBanner').style.display = '';
+  }
+
+  function nextDeskTask() {
+    const shuffled = [...DESK_TASKS].sort(() => Math.random() - 0.5);
+    for (const task of shuffled) {
+      const matching = allTasks.filter(task.filter);
+      if (matching.length > 0) {
+        showDeskTask(task, matching);
+        return;
+      }
+    }
+    document.getElementById('dcbTitle').textContent = '\u2713 השולחן נקי!';
+    document.getElementById('dcbSub').textContent = 'אין משימות הזנה פתוחות כרגע';
+    document.getElementById('dcbBody').style.display = 'none';
+  }
+
+  function showDeskTask(task, items) {
+    document.getElementById('dcbTitle').textContent = task.title;
+    document.getElementById('dcbSub').innerHTML = `${task.desc} <span class="dcb-count">${items.length}</span>`;
+
+    const container = document.getElementById('dcbItems');
+    container.innerHTML = '';
+
+    for (const item of items.slice(0, 30)) {
+      const div = document.createElement('div');
+      div.className = 'dcb-item';
+
+      let actionHtml = '';
+      if (task.type === 'supplier') {
+        const opts = suppliersList.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+        actionHtml = `
+          <select class="dcb-item-select" id="dcb-sup-${item.id}">
+            <option value="">בחר ספק...</option>${opts}
+          </select>
+          <button class="dcb-item-btn" onclick="saveDeskSupplier('${item.id}', this)">שייך</button>`;
+      } else if (task.type === 'cost') {
+        actionHtml = `
+          <input class="dcb-item-input" type="number" id="dcb-cost-${item.id}" placeholder="\u20AA">
+          <button class="dcb-item-btn" onclick="saveDeskCost('${item.id}', this)">שמור</button>`;
+      } else if (task.type === 'status') {
+        actionHtml = `
+          <select class="dcb-item-select" id="dcb-stat-${item.id}">
+            <option value="ממתין">⏳ ממתין</option>
+            <option value="בתהליך">🔄 בתהליך</option>
+            <option value="בוצע">✓ בוצע</option>
+          </select>
+          <button class="dcb-item-btn" onclick="saveDeskStatus('${item.id}', this)">עדכן</button>`;
+      } else if (task.type === 'date') {
+        actionHtml = `
+          <input class="dcb-item-input" type="date" id="dcb-date-${item.id}" style="width:140px">
+          <button class="dcb-item-btn" onclick="saveDeskDate('${item.id}', this)">קבע</button>`;
+      }
+
+      div.innerHTML = `
+        <div class="dcb-item-name">${item.parentName || ''}</div>
+        <div class="dcb-item-task">${item.name || ''}</div>
+        ${actionHtml}`;
+      container.appendChild(div);
+    }
+
+    if (items.length > 30) {
+      container.innerHTML += `<div style="text-align:center;color:#7a7f99;padding:8px;font-size:12px">ועוד ${items.length - 30} משימות...</div>`;
+    }
+  }
+
+  function toggleDeskClean() {
+    const body = document.getElementById('dcbBody');
+    const arrow = document.getElementById('dcbArrow');
+    if (body.style.display === 'none') {
+      body.style.display = '';
+      arrow.classList.add('open');
+    } else {
+      body.style.display = 'none';
+      arrow.classList.remove('open');
+    }
+  }
+
+  function closeDeskClean() {
+    document.getElementById('deskCleanBanner').style.display = 'none';
+  }
+
+  async function saveDeskSupplier(itemId, btn) {
+    const select = document.getElementById('dcb-sup-' + itemId);
+    const supplierId = select.value;
+    if (!supplierId) return;
+    btn.textContent = '...';
+    try {
+      const res = await fetch(`${WORKER_URL}/assign-supplier`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subitemId: itemId, supplierId }),
+      });
+      if (res.ok) {
+        btn.textContent = '\u2713';
+        btn.classList.add('saved');
+      } else {
+        btn.textContent = '\u2715';
+      }
+    } catch(e) { btn.textContent = '\u2715'; }
+  }
+
+  async function saveDeskCost(itemId, btn) {
+    const input = document.getElementById('dcb-cost-' + itemId);
+    const val = parseFloat(input.value);
+    if (!val || val <= 0) return;
+    btn.textContent = '...';
+    try {
+      const res = await fetch(`${WORKER_URL}/update-subitem-cost`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [{ subitemId: itemId, columnId: 'numeric_mkyw7ky', value: val }] }),
+      });
+      if (res.ok) {
+        btn.textContent = '\u2713';
+        btn.classList.add('saved');
+      } else {
+        btn.textContent = '\u2715';
+      }
+    } catch(e) { btn.textContent = '\u2715'; }
+  }
+
+  async function saveDeskStatus(itemId, btn) {
+    const select = document.getElementById('dcb-stat-' + itemId);
+    const status = select.value;
+    btn.textContent = '...';
+    try {
+      const res = await fetch(`${WORKER_URL}/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subitemId: itemId, status }),
+      });
+      if (res.ok) {
+        btn.textContent = '\u2713';
+        btn.classList.add('saved');
+      } else {
+        btn.textContent = '\u2715';
+      }
+    } catch(e) { btn.textContent = '\u2715'; }
+  }
+
+  async function saveDeskDate(itemId, btn) {
+    const input = document.getElementById('dcb-date-' + itemId);
+    const date = input.value;
+    if (!date) return;
+    btn.textContent = '...';
+    try {
+      const res = await fetch(`${WORKER_URL}/update-date`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subitemId: itemId, date }),
+      });
+      if (res.ok) {
+        btn.textContent = '\u2713';
+        btn.classList.add('saved');
+      } else {
+        btn.textContent = '\u2715';
+      }
+    } catch(e) { btn.textContent = '\u2715'; }
   }
 
 </script>
