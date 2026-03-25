@@ -1261,24 +1261,42 @@
   .btn-phone-cancel { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border) !important; }
   .btn-phone-cancel:hover { color: var(--text); }
 
-  /* ── Desk Clean Module ── */
-  .desk-clean-banner {
-    margin: 12px 16px;
-    background: linear-gradient(135deg, #1a1d27 0%, #1e2235 100%);
-    border: 1px solid #2e3248;
-    border-radius: 12px;
-    overflow: hidden;
-    transition: all 0.3s;
+  /* ── Desk Clean Popup ── */
+  .desk-clean-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: dcFadeIn 0.3s ease;
   }
+  @keyframes dcFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .desk-clean-popup {
+    background: #161b22;
+    border: 1px solid #2e3248;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: dcSlideUp 0.3s ease;
+  }
+  @keyframes dcSlideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .dcb-header {
-    padding: 14px 18px;
+    padding: 18px 20px;
     display: flex;
     align-items: center;
     gap: 12px;
-    cursor: pointer;
-    transition: background 0.2s;
+    border-bottom: 1px solid #2e3248;
+    flex-shrink: 0;
   }
-  .dcb-header:hover { background: rgba(79,142,247,0.05); }
   .dcb-icon { font-size: 22px; }
   .dcb-text { flex: 1; }
   .dcb-title { font-size: 15px; font-weight: 700; color: #e8eaf6; }
@@ -1301,8 +1319,8 @@
   .dcb-skip:hover, .dcb-close:hover { background: rgba(255,255,255,0.1); color: #e8eaf6; }
   .dcb-arrow { color: #4f8ef7; font-size: 14px; transition: transform 0.3s; }
   .dcb-arrow.open { transform: rotate(90deg); }
-  .dcb-body { padding: 0 18px 16px; }
-  .dcb-items { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+  .dcb-body { padding: 0 18px 16px; overflow-y: auto; flex: 1; }
+  .dcb-items { display: flex; flex-direction: column; gap: 6px; }
   .dcb-item {
     display: flex;
     align-items: center;
@@ -1442,21 +1460,22 @@
 
 <div class="stats-bar" id="statsBar"></div>
 
-<div class="desk-clean-banner" id="deskCleanBanner" style="display:none">
-  <div class="dcb-header" onclick="toggleDeskClean()">
-    <div class="dcb-icon">🧹</div>
-    <div class="dcb-text">
-      <div class="dcb-title" id="dcbTitle">ניקוי שולחן</div>
-      <div class="dcb-sub" id="dcbSub">לוקח רגע...</div>
+<div class="desk-clean-overlay" id="deskCleanOverlay" style="display:none" onclick="if(event.target===this)closeDeskClean()">
+  <div class="desk-clean-popup">
+    <div class="dcb-header">
+      <div class="dcb-icon">🧹</div>
+      <div class="dcb-text">
+        <div class="dcb-title" id="dcbTitle">ניקוי שולחן</div>
+        <div class="dcb-sub" id="dcbSub">לוקח רגע...</div>
+      </div>
+      <div class="dcb-actions">
+        <button class="dcb-skip" onclick="nextDeskTask()" title="משימה אחרת">⟳</button>
+        <button class="dcb-close" onclick="closeDeskClean()" title="סגור">✕</button>
+      </div>
     </div>
-    <div class="dcb-actions">
-      <button class="dcb-skip" onclick="event.stopPropagation();nextDeskTask()" title="משימה אחרת">⟳</button>
-      <button class="dcb-close" onclick="event.stopPropagation();closeDeskClean()" title="סגור">✕</button>
-      <span class="dcb-arrow" id="dcbArrow">▸</span>
+    <div class="dcb-body" id="dcbBody">
+      <div class="dcb-items" id="dcbItems"></div>
     </div>
-  </div>
-  <div class="dcb-body" id="dcbBody" style="display:none">
-    <div class="dcb-items" id="dcbItems"></div>
   </div>
 </div>
 
@@ -1545,18 +1564,30 @@
     try {
       const allParam = showAllTasks ? 'all=true' : '';
 
-      // Load tasks (cached = instant, miss = full fetch) + buttons in parallel
-      const [tasksRes, buttonsRes] = await Promise.all([
-        fetch(`${WORKER_URL}/items?${allParam}`),
+      // Quick load first page, then full load
+      const quickParam = `${allParam}${allParam ? '&' : ''}quick=true`;
+      const [quickRes, buttonsRes] = await Promise.all([
+        fetch(`${WORKER_URL}/items?${quickParam}`),
         allButtons.length === 0 ? fetch(`${WORKER_URL}/buttons`) : Promise.resolve(null),
       ]);
-      if (!tasksRes.ok) throw new Error(`HTTP ${tasksRes.status}`);
-      allTasks = await tasksRes.json();
+      if (!quickRes.ok) throw new Error(`HTTP ${quickRes.status}`);
+      allTasks = await quickRes.json();
       if (buttonsRes && buttonsRes.ok) allButtons = await buttonsRes.json();
 
+      // Render what we have immediately
       populateProjectFilter();
       renderStats();
       renderFiltered();
+
+      // Now load the full set in background
+      const fullRes = await fetch(`${WORKER_URL}/items?${allParam}`);
+      if (fullRes.ok) {
+        allTasks = await fullRes.json();
+        populateProjectFilter();
+        renderStats();
+        renderFiltered();
+      }
+
       initDeskClean();
       const isCached = tasksRes.headers.get('X-Cache') === 'HIT';
       showToast(`נטענו ${allTasks.length} משימות ✓${isCached ? '' : ''}`);
@@ -2970,8 +3001,15 @@
       }
 
       if (data.pendingMatches && data.pendingMatches.length > 0) {
-        updateSyncLine('pending', `${data.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
-        showMatchModal(data.pendingMatches);
+        // Only show match modal if not already dismissed this session
+        const dismissKey = 'matchModal_dismissed_' + data.pendingMatches.map(c => c.mondayId).sort().join(',');
+        if (!sessionStorage.getItem(dismissKey)) {
+          updateSyncLine('pending', `${data.pendingMatches.length} פרויקטים ממתינים לאישור`, false);
+          showMatchModal(data.pendingMatches);
+          sessionStorage.setItem(dismissKey, '1');
+        } else {
+          setTimeout(hideSyncStatus, 4000);
+        }
       } else {
         setTimeout(hideSyncStatus, 4000);
       }
@@ -3029,14 +3067,25 @@
   let deskTaskIndex = -1;
   let suppliersList = [];
 
+  let deskCleanTimer = null;
+
   async function initDeskClean() {
     try {
       const res = await fetch(`${WORKER_URL}/suppliers`);
       if (res.ok) suppliersList = await res.json();
     } catch(e) {}
 
+    // Show popup on first load
+    showDeskCleanPopup();
+
+    // Re-show every 30 minutes
+    if (deskCleanTimer) clearInterval(deskCleanTimer);
+    deskCleanTimer = setInterval(showDeskCleanPopup, 30 * 60 * 1000);
+  }
+
+  function showDeskCleanPopup() {
     nextDeskTask();
-    document.getElementById('deskCleanBanner').style.display = '';
+    document.getElementById('deskCleanOverlay').style.display = 'flex';
   }
 
   function nextDeskTask() {
@@ -3103,19 +3152,11 @@
   }
 
   function toggleDeskClean() {
-    const body = document.getElementById('dcbBody');
-    const arrow = document.getElementById('dcbArrow');
-    if (body.style.display === 'none') {
-      body.style.display = '';
-      arrow.classList.add('open');
-    } else {
-      body.style.display = 'none';
-      arrow.classList.remove('open');
-    }
+    // Popup is always open — kept for compatibility
   }
 
   function closeDeskClean() {
-    document.getElementById('deskCleanBanner').style.display = 'none';
+    document.getElementById('deskCleanOverlay').style.display = 'none';
   }
 
   async function saveDeskSupplier(itemId, btn) {
