@@ -1589,13 +1589,7 @@
       }
 
       initDeskClean();
-      const isCached = tasksRes.headers.get('X-Cache') === 'HIT';
-      showToast(`נטענו ${allTasks.length} משימות ✓${isCached ? '' : ''}`);
-
-      // If served from cache, refresh in background for next time
-      if (isCached) {
-        fetch(`${WORKER_URL}/items?${allParam}&nocache=true`).catch(() => {});
-      }
+      showToast(`נטענו ${allTasks.length} משימות ✓`);
     } catch (e) {
       document.getElementById('listContainer').innerHTML = `
         <div class="state-box">
