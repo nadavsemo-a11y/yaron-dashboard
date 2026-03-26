@@ -1564,30 +1564,18 @@
     try {
       const allParam = showAllTasks ? 'all=true' : '';
 
-      // Quick load first page, then full load
-      const quickParam = `${allParam}${allParam ? '&' : ''}quick=true`;
-      const [quickRes, buttonsRes] = await Promise.all([
-        fetch(`${WORKER_URL}/items?${quickParam}`),
+      // Single load with cache support
+      const [tasksRes, buttonsRes] = await Promise.all([
+        fetch(`${WORKER_URL}/items?${allParam}`),
         allButtons.length === 0 ? fetch(`${WORKER_URL}/buttons`) : Promise.resolve(null),
       ]);
-      if (!quickRes.ok) throw new Error(`HTTP ${quickRes.status}`);
-      allTasks = await quickRes.json();
+      if (!tasksRes.ok) throw new Error(`HTTP ${tasksRes.status}`);
+      allTasks = await tasksRes.json();
       if (buttonsRes && buttonsRes.ok) allButtons = await buttonsRes.json();
 
-      // Render what we have immediately
       populateProjectFilter();
       renderStats();
       renderFiltered();
-
-      // Now load the full set in background
-      const fullRes = await fetch(`${WORKER_URL}/items?${allParam}`);
-      if (fullRes.ok) {
-        allTasks = await fullRes.json();
-        populateProjectFilter();
-        renderStats();
-        renderFiltered();
-      }
-
       initDeskClean();
       showToast(`נטענו ${allTasks.length} משימות ✓`);
     } catch (e) {
@@ -2968,8 +2956,7 @@
 
   loadTasks().then(() => {
     enableIntroButton();
-    // Auto INTERSOL sync on load — background, non-blocking
-    backgroundSync();
+    // INTERSOL sync only on manual button click, not auto on load
   });
 
   async function backgroundSync() {
