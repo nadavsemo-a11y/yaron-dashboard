@@ -1576,8 +1576,9 @@
       populateProjectFilter();
       renderStats();
       renderFiltered();
-      initDeskClean();
       showToast(`נטענו ${allTasks.length} משימות ✓`);
+      // Desk clean popup — delayed so it doesn't block rendering
+      setTimeout(() => { try { initDeskClean(); } catch(e) { console.error('DeskClean error:', e); } }, 2000);
     } catch (e) {
       document.getElementById('listContainer').innerHTML = `
         <div class="state-box">
